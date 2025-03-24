@@ -1,0 +1,36 @@
+.admin-dashboard-container {
+    display: flex;
+    padding-top: 90px; /* Match ProductsPage to avoid navbar overlap */
+  }
+  
+  .admin-sidebar {
+    width: 250px;
+    background: #2874f0;
+    color: white;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  
+  .admin-sidebar h2 {
+    margin-bottom: 20px;
+  }
+  
+  .admin-nav-item {
+    padding: 10px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: white;
+    text-align: left;
+    width: 100%;
+    font-size: 16px;
+  }
+  
+  .admin-nav-item:hover {
+    background: #0056b3;
+  }
+  
+  .admin-content {
+    flex-grow: 1;
+    padding: 20px;
+  }

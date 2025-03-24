@@ -1,0 +1,55 @@
+.signup-container {
+  width: 100%;
+  max-width: 400px;
+  margin: 50px auto;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.signup-container h2 {
+  margin-bottom: 20px;
+}
+
+.signup-container input {
+  width: 100%;
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-sizing: border-box; /* Ensures padding doesn’t affect width */
+}
+
+.signup-container button {
+  width: 100%;
+  padding: 10px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.signup-container button:hover {
+  background: #0056b3; /* Added hover effect for consistency */
+}
+
+.signup-container .error {
+  color: red;
+  margin-bottom: 10px;
+}
+
+.signup-container p {
+  margin-top: 15px;
+}
+
+.signup-container a {
+  color: #007bff;
+  text-decoration: none;
+}
+
+.signup-container a:hover {
+  text-decoration: underline;
+}
