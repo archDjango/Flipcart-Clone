@@ -1,0 +1,85 @@
+/* Sidebar Base Styles */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: -250px; /* Initially hidden */
+  width: 250px;
+  height: 100%;
+  background-color: #fff;
+  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.2);
+  transition: left 0.3s ease-in-out;
+  padding-top: 60px;
+  z-index: 1000;
+}
+
+/* Open Sidebar */
+.sidebar.open {
+  left: 0;
+}
+
+/* Sidebar List Styles */
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+}
+
+.sidebar ul li {
+  padding: 15px;
+  text-align: center;
+}
+
+.sidebar ul li a {
+  text-decoration: none;
+  color: #333;
+  font-weight: bold;
+  display: block;
+  transition: 0.2s;
+}
+
+.sidebar ul li a:hover {
+  background: #f4f4f4;
+}
+
+/* Close Button */
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 24px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* 🛠 Adjusted Hamburger Menu Button */
+.hamburger {
+  position: absolute;
+  top: 50%; /* Aligns with navbar vertically */
+  left: 15px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: aqua;
+  font-size: 30px;
+  cursor: pointer;
+  z-index: 1100;
+}
+
+/* On smaller screens, adjust the position */
+@media (max-width: 768px) {
+  .hamburger {
+    left: 10px;
+    font-size: 28px;
+  }
+}
+
+/* Overlay */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 900;
+}

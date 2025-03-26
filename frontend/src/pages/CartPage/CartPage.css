@@ -1,0 +1,151 @@
+/* Overall container */
+.cart-container {
+  padding: 20px;
+  max-width: 1200px;
+  margin: auto;
+}
+
+/* Heading */
+.cart-heading {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 20px;
+}
+
+/* Empty cart message */
+.empty-cart {
+  text-align: center;
+  font-size: 20px;
+  padding: 40px 0;
+}
+
+/* Layout for content */
+.cart-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+/* Cart items list */
+.cart-items {
+  flex: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+/* Individual cart item */
+.cart-item {
+  display: flex;
+  gap: 15px;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background-color: #fff;
+}
+
+/* Cart item image */
+.cart-item-image {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+}
+
+/* Item details */
+.cart-item-details {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cart-item-details h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.cart-item-details p {
+  margin: 5px 0;
+  font-weight: bold;
+}
+
+/* Quantity controls */
+.cart-quantity-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cart-quantity-controls button {
+  padding: 5px 10px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* Remove button */
+.remove-btn {
+  background-color: transparent;
+  border: none;
+  color: #2874f0;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 5px;
+}
+
+/* Price summary section */
+.cart-summary {
+  flex: 1;
+  padding: 20px;
+  border: 1px solid #e0e0e0;
+  background-color: #fff;
+  border-radius: 5px;
+  max-width: 350px;
+}
+
+.cart-summary h3 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+
+.cart-summary p {
+  margin: 10px 0;
+}
+
+.cart-summary h4 {
+  margin-top: 15px;
+  font-size: 22px;
+}
+
+.savings-text {
+  color: green;
+  margin-top: 10px;
+}
+
+/* Place Order button */
+.place-order-btn {
+  margin-top: 20px;
+  width: 100%;
+  padding: 12px;
+  background-color: #fb641b;
+  color: white;
+  font-weight: bold;
+  border: none;
+  cursor: pointer;
+  border-radius: 5px;
+  font-size: 16px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .cart-content {
+    flex-direction: column;
+  }
+
+  .cart-summary {
+    max-width: 100%;
+  }
+
+  .cart-item-image {
+    width: 100px;
+    height: 100px;
+  }
+}

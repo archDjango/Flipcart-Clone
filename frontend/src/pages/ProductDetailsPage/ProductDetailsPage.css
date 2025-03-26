@@ -1,0 +1,35 @@
+.product-details-container {
+  max-width: 900px;
+  margin: auto;
+  padding: 20px;
+}
+
+.product-details-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.product-image img {
+  width: 300px;
+  height: auto;
+  border-radius: 10px;
+}
+
+.product-info {
+  padding: 20px;
+}
+
+.product-rating {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.buy-now-btn {
+  background-color: #ff5722;
+  color: white;
+  padding: 10px;
+  border: none;
+  cursor: pointer;
+}
