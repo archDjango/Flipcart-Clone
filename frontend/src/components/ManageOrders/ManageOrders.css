@@ -1,0 +1,27 @@
+.manage-orders {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.order-item {
+  border: 1px solid #ddd;
+  padding: 15px;
+  border-radius: 5px;
+}
+
+.order-item p {
+  margin: 5px 0;
+}
+
+.order-item select {
+  margin-top: 10px;
+  padding: 5px;
+}

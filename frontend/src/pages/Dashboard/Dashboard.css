@@ -1,0 +1,65 @@
+.profile-card {
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  width: 100%;
+  max-width: 400px;
+  margin: 20px auto;
+  text-align: center;
+}
+
+.profile-card-header {
+  background-color: #2874f0;
+  color: white;
+  padding: 10px;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+
+.profile-card-body {
+  padding: 15px;
+  font-size: 16px;
+  color: #333;
+}
+
+.profile-card-footer {
+  padding: 10px;
+}
+
+.update-profile-btn {
+  background-color: #2874f0;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 16px;
+  border-radius: 5px;
+}
+
+.update-profile-btn:hover {
+  background-color: #0056b3;
+}
+
+/* Dark Mode */
+body.dark-mode .profile-card {
+  background: #2a2a2a;
+  color: #fff;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+body.dark-mode .profile-card-header {
+  background-color: #1a5dc7;
+}
+
+body.dark-mode .profile-card-body {
+  color: #ddd;
+}
+
+body.dark-mode .update-profile-btn {
+  background-color: #1a5dc7;
+}
+
+body.dark-mode .update-profile-btn:hover {
+  background-color: #144ba3;
+}
