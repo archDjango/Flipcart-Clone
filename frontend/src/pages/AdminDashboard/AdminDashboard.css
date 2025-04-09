@@ -120,6 +120,12 @@
 .Toastify__toast-container {
   z-index: 9999;
 }
+.description-preview {
+  font-size: 0.9em;
+  color: #666;
+  margin-left: 10px;
+  font-style: italic;
+}
 
 /* Dark Mode */
 body.dark-mode .admin-dashboard {
