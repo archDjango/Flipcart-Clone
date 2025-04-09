@@ -3,6 +3,8 @@ import axios from 'axios';
 import Papa from 'papaparse';
 import imageCompression from 'browser-image-compression';
 import { Tooltip } from 'react-tooltip';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import './ManageProducts.css';
 
 const PRODUCTS_PER_PAGE = 10;
@@ -28,7 +30,7 @@ const ManageProducts = () => {
   const [products, setProducts] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [form, setForm] = useState({ name: '', price: '', stock: '', category: '', image: null });
+  const [form, setForm] = useState({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null });
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -39,7 +41,11 @@ const ManageProducts = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [sortField, setSortField] = useState('id');
   const [sortOrder, setSortOrder] = useState('asc');
-  const [loading, setLoading] = useState(true); // Added for loading spinner
+  const [loading, setLoading] = useState(true);
+  const [descriptionModalOpen, setDescriptionModalOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState({ title: '', category: '', keywords: '' });
+  const [generatedDescription, setGeneratedDescription] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     fetchProducts();
@@ -137,20 +143,29 @@ const ManageProducts = () => {
     formData.append('price', form.price);
     formData.append('stock', form.stock);
     formData.append('category', form.category);
-    if (form.image) formData.append('image', form.image);
-
+    // Always append description, even if empty, to avoid undefined
+    formData.append('description', form.description || '');
+    // Only append image if a new file is selected; otherwise, rely on backend to keep existing image
+    if (form.image instanceof File) {
+      formData.append('image', form.image);
+    } else if (editMode && form.image) {
+      formData.append('image', form.image); // Send existing image path if no new upload
+    }
+  
     try {
       const res = editMode
         ? await axios.put(`http://localhost:5000/api/products/${form.id}`, formData, {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
           })
         : await axios.post('http://localhost:5000/api/products', formData, {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
           });
       setProducts(editMode ? products.map(p => p.id === form.id ? res.data : p) : [...products, res.data]);
       closeModal();
+      toast.success(editMode ? 'Product updated successfully!' : 'Product added successfully!');
     } catch (err) {
       setError('Failed to save product: ' + (err.response?.data?.message || 'Unknown error'));
+      toast.error('Failed to save product');
     }
   };
 
@@ -168,8 +183,10 @@ const ManageProducts = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setProducts(products.filter(p => p.id !== id));
+      toast.success('Product deleted successfully!');
     } catch (err) {
       setError('Failed to delete product: ' + (err.response?.data?.message || 'Unknown error'));
+      toast.error('Failed to delete product');
     }
   };
 
@@ -184,8 +201,10 @@ const ManageProducts = () => {
       });
       setProducts(products.filter(p => !selectedProducts.includes(p.id)));
       setSelectedProducts([]);
+      toast.success(`${selectedProducts.length} products deleted successfully!`);
     } catch (err) {
       setError('Failed to delete products: ' + (err.response?.data?.message || 'Unknown error'));
+      toast.error('Failed to delete products');
     }
   };
 
@@ -202,6 +221,7 @@ const ManageProducts = () => {
           price: Number(row.price),
           stock: Number(row.stock),
           category: row.category,
+          description: row.description || '',
         }));
         try {
           await Promise.all(
@@ -213,15 +233,17 @@ const ManageProducts = () => {
           );
           fetchProducts();
           setCsvFile(null);
+          toast.success('Products imported successfully!');
         } catch (err) {
           setError('Failed to import products: ' + (err.response?.data?.message || 'Unknown error'));
+          toast.error('Failed to import products');
         }
       },
     });
   };
 
   const openModal = () => {
-    setForm({ name: '', price: '', stock: '', category: '', image: null });
+    setForm({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null });
     setEditMode(false);
     setModalOpen(true);
     setErrors({});
@@ -239,6 +261,36 @@ const ManageProducts = () => {
     setSortOrder(sortField === field && sortOrder === 'asc' ? 'desc' : 'asc');
   };
 
+  const handleGenerateDescription = async () => {
+    if (!aiPrompt.title || !aiPrompt.category) {
+      toast.error('Please provide at least title and category');
+      return;
+    }
+    setGenerating(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        'http://localhost:5000/api/products/generate-description',
+        aiPrompt,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGeneratedDescription(response.data.description);
+      toast.success('Description generated successfully!');
+    } catch (err) {
+      toast.error('Failed to generate description: ' + (err.response?.data?.message || 'Unknown error'));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleAcceptDescription = () => {
+    setForm(prev => ({ ...prev, description: generatedDescription }));
+    setDescriptionModalOpen(false);
+    setGeneratedDescription('');
+    setAiPrompt({ title: '', category: '', keywords: '' });
+    toast.info('Description added to product form');
+  };
+
   const filtered = filterProducts(products, search, categoryFilter, stockFilter);
   const sorted = sortProducts(filtered, sortField, sortOrder);
   const paginated = sorted.slice(
@@ -249,26 +301,17 @@ const ManageProducts = () => {
 
   return (
     <div className="manage-products">
+      <ToastContainer position="top-right" autoClose={3000} />
       <h2>Manage Products</h2>
       <div className="controls">
-        <button
-          className="add-btn"
-          onClick={openModal}
-          data-tooltip-id="tooltip"
-          data-tooltip-content="Add a new product"
-        >
+        <button className="add-btn" onClick={openModal} data-tooltip-id="tooltip" data-tooltip-content="Add a new product">
           Add Product
         </button>
         <div className="csv-upload">
           <input type="file" accept=".csv" onChange={e => setCsvFile(e.target.files[0])} />
           <button onClick={handleCsvUpload}>Import CSV</button>
         </div>
-        <input
-          type="text"
-          placeholder="Search by name..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+        <input type="text" placeholder="Search by name..." value={search} onChange={e => setSearch(e.target.value)} />
         <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
           <option value="">All Categories</option>
           {[...new Set(products.map(p => p.category))].map(cat => (
@@ -300,63 +343,28 @@ const ManageProducts = () => {
           <thead>
             <tr>
               <th></th>
-              <th onClick={() => handleSort('id')}>
-                ID {sortField === 'id' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
-              <th onClick={() => handleSort('name')}>
-                Name {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
-              <th onClick={() => handleSort('price')}>
-                Price {sortField === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
-              <th onClick={() => handleSort('stock')}>
-                Stock {sortField === 'stock' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
-              <th onClick={() => handleSort('category')}>
-                Category {sortField === 'category' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
-              <th onClick={() => handleSort('created_at')}>
-                Date Added {sortField === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}
-              </th>
+              <th onClick={() => handleSort('id')}>ID {sortField === 'id' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('name')}>Name {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('price')}>Price {sortField === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('stock')}>Stock {sortField === 'stock' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('category')}>Category {sortField === 'category' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('created_at')}>Date Added {sortField === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {paginated.map(product => (
               <tr key={product.id} className={product.stock < 10 ? 'low-stock' : ''}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selectedProducts.includes(product.id)}
-                    onChange={() => toggleSelectProduct(product.id)}
-                  />
-                </td>
+                <td><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={() => toggleSelectProduct(product.id)} /></td>
                 <td>{product.id}</td>
-                <td>
-                  {product.name} 
-                  {product.stock < 10 && <span className="low-stock-badge">Low</span>}
-                </td>
+                <td>{product.name} {product.stock < 10 && <span className="low-stock-badge">Low</span>}</td>
                 <td>₹{product.price}</td>
                 <td>{product.stock}</td>
                 <td>{product.category}</td>
                 <td>{new Date(product.created_at).toLocaleDateString()}</td>
                 <td>
-                  <button
-                    className="edit-btn"
-                    onClick={() => handleEdit(product)}
-                    data-tooltip-id="tooltip"
-                    data-tooltip-content="Edit this product"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="delete-btn"
-                    onClick={() => handleDelete(product.id)}
-                    data-tooltip-id="tooltip"
-                    data-tooltip-content="Delete this product"
-                  >
-                    Delete
-                  </button>
+                  <button className="edit-btn" onClick={() => handleEdit(product)} data-tooltip-id="tooltip" data-tooltip-content="Edit this product">Edit</button>
+                  <button className="delete-btn" onClick={() => handleDelete(product.id)} data-tooltip-id="tooltip" data-tooltip-content="Delete this product">Delete</button>
                 </td>
               </tr>
             ))}
@@ -364,19 +372,9 @@ const ManageProducts = () => {
         </table>
       )}
       <div className="pagination">
-        <button
-          disabled={currentPage === 1}
-          onClick={() => setCurrentPage(prev => prev - 1)}
-        >
-          Previous
-        </button>
+        <button disabled={currentPage === 1} onClick={() => setCurrentPage(prev => prev - 1)}>Previous</button>
         <span>Page {currentPage} of {totalPages}</span>
-        <button
-          disabled={currentPage === totalPages}
-          onClick={() => setCurrentPage(prev => prev + 1)}
-        >
-          Next
-        </button>
+        <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(prev => prev + 1)}>Next</button>
       </div>
 
       {modalOpen && (
@@ -442,13 +440,30 @@ const ManageProducts = () => {
                 {errors.category && <span className="error">{errors.category}</span>}
               </div>
               <div className="form-group">
+                <label>Description</label>
+                <div className="description-group">
+                  <textarea
+                    name="description"
+                    value={form.description}
+                    onChange={handleChange}
+                    className={form.description ? 'has-ai-content' : ''}
+                    placeholder="Enter product description or generate one"
+                    rows="4"
+                  />
+                  <button
+                    type="button"
+                    className="ai-generate-btn"
+                    onClick={() => setDescriptionModalOpen(true)}
+                    data-tooltip-id="tooltip"
+                    data-tooltip-content="Generate description using AI"
+                  >
+                    Generate with AI
+                  </button>
+                </div>
+              </div>
+              <div className="form-group">
                 <label>Image</label>
-                <input
-                  type="file"
-                  name="image"
-                  accept="image/*"
-                  onChange={handleChange}
-                />
+                <input type="file" name="image" accept="image/*" onChange={handleChange} />
                 {editMode && form.image && <p>Current image will be replaced if a new file is uploaded.</p>}
               </div>
               <div className="modal-buttons">
@@ -456,6 +471,65 @@ const ManageProducts = () => {
                 <button type="button" className="cancel-btn" onClick={closeModal}>Cancel</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {descriptionModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content ai-modal">
+            <h3>Generate Product Description</h3>
+            <div className="form-group">
+              <label>Product Title *</label>
+              <input
+                type="text"
+                value={aiPrompt.title}
+                onChange={(e) => setAiPrompt(prev => ({ ...prev, title: e.target.value }))}
+                placeholder="Enter product title"
+              />
+            </div>
+            <div className="form-group">
+              <label>Category *</label>
+              <select
+                value={aiPrompt.category}
+                onChange={(e) => setAiPrompt(prev => ({ ...prev, category: e.target.value }))}
+              >
+                <option value="">Select Category</option>
+                <option value="Electronics">Electronics</option>
+                <option value="Fashion">Fashion</option>
+                <option value="Appliances">Appliances</option>
+                <option value="Accessories">Accessories</option>
+                <option value="Furniture">Furniture</option>
+                <option value="Sports">Sports</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Keywords/Highlights (comma-separated)</label>
+              <input
+                type="text"
+                value={aiPrompt.keywords}
+                onChange={(e) => setAiPrompt(prev => ({ ...prev, keywords: e.target.value }))}
+                placeholder="e.g., durable, lightweight, premium"
+              />
+              <small className="info-tip">Separate keywords with commas for better results</small>
+            </div>
+            <div className="form-group">
+              {generatedDescription && (
+                <>
+                  <label>Generated Description</label>
+                  <textarea value={generatedDescription} readOnly rows="4" className="generated-description" />
+                </>
+              )}
+            </div>
+            <div className="modal-buttons">
+              <button onClick={handleGenerateDescription} disabled={generating} className="generate-btn">
+                {generating ? 'Generating...' : 'Generate'}
+              </button>
+              {generatedDescription && (
+                <button onClick={handleAcceptDescription} className="accept-btn">Accept</button>
+              )}
+              <button onClick={() => setDescriptionModalOpen(false)} className="cancel-btn">Cancel</button>
+            </div>
           </div>
         </div>
       )}

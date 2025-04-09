@@ -24,8 +24,15 @@ th { background: #f8f8f8; cursor: pointer; }
   display: flex; justify-content: center; align-items: center; z-index: 1000;
 }
 .modal-content {
-  background: white; padding: 20px; border-radius: 8px; width: 400px; max-width: 90%;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); animation: slideIn 0.3s ease-out;
+  background: white; 
+  padding: 20px; 
+  border-radius: 8px; 
+  width: 600px; /* Increased from 400px to 600px */
+  max-width: 90%; 
+  max-height: 80vh; /* Added to limit height and enable scrolling */
+  overflow-y: auto; /* Enable vertical scrolling if content overflows */
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); 
+  animation: slideIn 0.3s ease-out;
 }
 @keyframes slideIn {
   from { transform: translateY(-20px); opacity: 0; }
@@ -37,7 +44,17 @@ th { background: #f8f8f8; cursor: pointer; }
   width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px;
 }
 .form-group .input-error { border-color: #f44336; }
-.modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end; /* Changed from space-between to flex-end for better alignment */
+  gap: 10px; /* Added gap for spacing between buttons */
+  margin-top: 20px;
+}
+.save-btn, .cancel-btn {
+  padding: 10px 20px;
+  cursor: pointer;
+  min-width: 100px; /* Ensure buttons have a minimum width */
+}
 
 .spinner {
   text-align: center;
@@ -57,6 +74,57 @@ th { background: #f8f8f8; cursor: pointer; }
   font-size: 12px;
   margin-left: 5px;
 }
+.description-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-generate-btn {
+  align-self: flex-start;
+  background-color: #4CAF50;
+  color: white;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.ai-generate-btn:hover {
+  background-color: #45a049;
+}
+
+.has-ai-content {
+  border: 2px solid #4CAF50;
+}
+
+.ai-modal {
+  min-width: 400px;
+}
+
+.generated-description {
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+}
+
+.info-tip {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.generate-btn {
+  background-color: #2196F3;
+  color: white;
+}
+
+.accept-btn {
+  background-color: #4CAF50;
+  color: white;
+}
+
 /* Dark Mode */
 body.dark-mode .manage-products { background: #1a1a1a; color: #fff; }
 body.dark-mode .modal-content, body.dark-mode table { background: #2a2a2a; color: #fff; }
@@ -65,3 +133,18 @@ body.dark-mode .save-btn { background: #1a5dc7; }
 body.dark-mode .cancel-btn { background: #444; }
 body.dark-mode .add-btn { background: #1a5dc7; }
 body.dark-mode .delete-selected-btn { background: #cc3333; }
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .modal-content {
+    width: 90%;
+    padding: 15px;
+  }
+  .modal-buttons {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .save-btn, .cancel-btn {
+    width: 100%;
+  }
+}
