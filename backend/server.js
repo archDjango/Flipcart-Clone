@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
@@ -390,63 +389,96 @@ app.get('/api/products', auth(['admin', 'manager']), checkPermission('products',
 });
 
 // Get Public Products (No Auth)
-// server.js (replace the /api/public/products endpoint)
 app.get('/api/public/products', async (req, res) => {
-  const limit = parseInt(req.query.limit) || 8;
-  const offset = parseInt(req.query.offset) || 0;
-
-  // Validate parameters
-  if (isNaN(limit) || isNaN(offset) || limit < 0 || offset < 0) {
-    return res.status(400).json({ message: 'Invalid limit or offset' });
-  }
+  let limit, offset;
 
   try {
-    // Ensure the products table exists
-    const [rows] = await db.execute(
-      `SELECT id, name, price, stock, category, description, image, created_at, rating 
-       FROM products LIMIT ? OFFSET ?`,
-      [limit, offset]
-    );
-    const [countResult] = await db.execute('SELECT COUNT(*) as total FROM products');
-    res.json({ 
+    limit = parseInt(req.query.limit, 10) || 8;
+    offset = parseInt(req.query.offset, 10) || 0;
+
+    if (isNaN(limit) || isNaN(offset) || limit < 0 || offset < 0) {
+      return res.status(400).json({
+        message: 'Invalid limit or offset parameters',
+        received: { limit: req.query.limit, offset: req.query.offset },
+      });
+    }
+
+    if (limit > 1000) {
+      limit = 1000;
+    }
+
+    console.log('Fetching products with:', { limit, offset });
+
+    const query = `
+      SELECT id, name, price, stock, category, description, image, created_at, rating 
+      FROM products 
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+    const [rows] = await db.query(query);
+
+    const [countResult] = await db.query('SELECT COUNT(*) as total FROM products');
+
+    res.json({
       products: rows.map(row => ({
         ...row,
         price: Number(row.price),
         stock: Number(row.stock),
         rating: Number(row.rating) || 0,
-        image: row.image || '/default-product-image.jpg'
+        image: row.image || '/default-product-image.jpg',
       })),
-      total: countResult[0].total 
+      total: Number(countResult[0].total),
     });
   } catch (err) {
     console.error('Get public products error:', {
       message: err.message,
-      stack: err.stack,
       sqlMessage: err.sqlMessage,
-      sql: err.sql
+      sql: err.sql,
+      stack: err.stack,
     });
-    res.status(500).json({ message: 'Server error fetching products', error: err.message });
+    res.status(500).json({
+      message: 'Failed to fetch products',
+      error: err.sqlMessage || err.message,
+    });
   }
 });
 
 // Public endpoint to get a single product by ID
 app.get('/api/public/products/:id', async (req, res) => {
   const { id } = req.params;
+
+  const productId = parseInt(id, 10);
+  if (isNaN(productId) || productId <= 0) {
+    return res.status(400).json({ message: 'Invalid product ID' });
+  }
+
   try {
     const [rows] = await db.execute(
-      'SELECT id, name, price, stock, category, description, image, created_at FROM products WHERE id = ?',
-      [id]
+      'SELECT id, name, price, stock, category, description, image, created_at, rating FROM products WHERE id = ?',
+      [productId]
     );
+
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Product not found' });
     }
+
     res.json({
       ...rows[0],
+      price: Number(rows[0].price),
+      stock: Number(rows[0].stock),
+      rating: Number(rows[0].rating) || 0,
       image: rows[0].image || '/default-product-image.jpg',
     });
   } catch (err) {
-    console.error('Get product error:', err.message);
-    res.status(500).json({ message: 'Server error fetching product' });
+    console.error('Get product error:', {
+      message: err.message,
+      sqlMessage: err.sqlMessage,
+      sql: err.sql,
+      stack: err.stack,
+    });
+    res.status(500).json({
+      message: 'Failed to fetch product',
+      error: err.sqlMessage || err.message,
+    });
   }
 });
 
@@ -794,6 +826,7 @@ app.post('/api/reviews/:id/respond', auth(['admin', 'manager']), checkPermission
 });
 
 // Role Management Endpoints
+// Role Management Endpoints
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
   try {
     console.log('GET /api/roles called by user:', req.user);
@@ -805,7 +838,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               users_view, users_create, users_edit, users_delete,
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
-              roles_view, roles_create, roles_edit, roles_delete
+              roles_view, roles_create, roles_edit, roles_delete,
+              returns_view, returns_edit
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -855,6 +889,10 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
           edit: row.roles_edit,
           delete: row.roles_delete,
         },
+        returns: {
+          view: row.returns_view,
+          edit: row.returns_edit,
+        },
       }
     })));
   } catch (err) {
@@ -877,8 +915,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         users_view, users_create, users_edit, users_delete,
         admins_view, admins_create, admins_edit, admins_delete,
         analytics_view, analytics_create, analytics_edit, analytics_delete,
-        roles_view, roles_create, roles_edit, roles_delete
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        roles_view, roles_create, roles_edit, roles_delete,
+        returns_view, returns_edit
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -910,6 +949,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.roles.create || false,
         permissions.roles.edit || false,
         permissions.roles.delete || false,
+        permissions.returns.view || false,
+        permissions.returns.edit || false,
       ]
     );
     const [newRole] = await db.execute(
@@ -920,7 +961,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               users_view, users_create, users_edit, users_delete,
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
-              roles_view, roles_create, roles_edit, roles_delete
+              roles_view, roles_create, roles_edit, roles_delete,
+              returns_view, returns_edit
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -971,6 +1013,10 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
           edit: newRole[0].roles_edit,
           delete: newRole[0].roles_delete,
         },
+        returns: {
+          view: newRole[0].returns_view,
+          edit: newRole[0].returns_edit,
+        },
       }
     });
   } catch (err) {
@@ -994,7 +1040,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         users_view = ?, users_create = ?, users_edit = ?, users_delete = ?,
         admins_view = ?, admins_create = ?, admins_edit = ?, admins_delete = ?,
         analytics_view = ?, analytics_create = ?, analytics_edit = ?, analytics_delete = ?,
-        roles_view = ?, roles_create = ?, roles_edit = ?, roles_delete = ?
+        roles_view = ?, roles_create = ?, roles_edit = ?, roles_delete = ?,
+        returns_view = ?, returns_edit = ?
        WHERE id = ?`,
       [
         name,
@@ -1027,6 +1074,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.roles.create || false,
         permissions.roles.edit || false,
         permissions.roles.delete || false,
+        permissions.returns.view || false,
+        permissions.returns.edit || false,
         id
       ]
     );
@@ -1038,7 +1087,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               users_view, users_create, users_edit, users_delete,
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
-              roles_view, roles_create, roles_edit, roles_delete
+              roles_view, roles_create, roles_edit, roles_delete,
+              returns_view, returns_edit
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1090,6 +1140,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
           edit: updatedRole[0].roles_edit,
           delete: updatedRole[0].roles_delete,
         },
+        returns: {
+          view: updatedRole[0].returns_view,
+          edit: updatedRole[0].returns_edit,
+        },
       }
     });
   } catch (err) {
@@ -1097,7 +1151,6 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 app.delete('/api/roles/:id', auth(['admin']), checkPermission('roles', 'delete'), async (req, res) => {
   const { id } = req.params;
   try {
@@ -1154,7 +1207,8 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), async (req,
               r.users_view, r.users_create, r.users_edit, r.users_delete,
               r.admins_view, r.admins_create, r.admins_edit, r.admins_delete,
               r.analytics_view, r.analytics_create, r.analytics_edit, r.analytics_delete,
-              r.roles_view, r.roles_create, r.roles_edit, r.roles_delete
+              r.roles_view, r.roles_create, r.roles_edit, r.roles_delete,
+              r.returns_view, r.returns_edit
        FROM user_roles ur
        JOIN roles r ON ur.role_id = r.id
        WHERE ur.user_id = ?`,
@@ -1208,6 +1262,10 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), async (req,
         edit: rows[0].roles_edit,
         delete: rows[0].roles_delete,
       },
+      returns: {
+        view: rows[0].returns_view,
+        edit: rows[0].returns_edit,
+      },
     };
     res.json({
       roles: rows.map(row => ({
@@ -1224,8 +1282,6 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), async (req,
 });
 
 // New Payment Methods Analytics Endpoint
-// In server.js, replace the existing /api/payment-methods-analytics endpoint
-
 app.get('/api/payment-methods-analytics', auth(['admin', 'manager']), checkPermission('analytics', 'view'), async (req, res) => {
   try {
     const { startDate, endDate, status } = req.query;
@@ -1239,7 +1295,6 @@ app.get('/api/payment-methods-analytics', auth(['admin', 'manager']), checkPermi
     `;
     const params = [];
 
-    // Apply filters
     if (startDate) {
       query += ' AND created_at >= ?';
       params.push(startDate);
@@ -1255,14 +1310,11 @@ app.get('/api/payment-methods-analytics', auth(['admin', 'manager']), checkPermi
 
     query += ' GROUP BY payment_method';
 
-    // Fetch analytics data
     const [rows] = await db.execute(query, params);
 
-    // Calculate totals
     const totalOrders = rows.reduce((sum, row) => sum + Number(row.orderCount), 0);
     const totalRevenue = rows.reduce((sum, row) => sum + Number(row.totalRevenue || 0), 0);
 
-    // Map analytics with percentageShare
     const analytics = rows.map(row => ({
       paymentMethod: row.paymentMethod,
       orderCount: Number(row.orderCount),
@@ -1282,9 +1334,6 @@ app.get('/api/payment-methods-analytics', auth(['admin', 'manager']), checkPermi
     res.status(500).json({ message: 'Server error fetching payment analytics' });
   }
 });
-
-
-// server.js (add after existing endpoints)
 
 // Order Activity Heatmap Analytics
 app.get('/api/analytics/order-activity', auth(['admin', 'manager']), checkPermission('analytics', 'view'), async (req, res) => {
@@ -1317,7 +1366,6 @@ app.get('/api/analytics/order-activity', auth(['admin', 'manager']), checkPermis
 
     const [rows] = await db.execute(query, params);
 
-    // Transform data into heatmap format
     const heatmapData = [];
     for (let day = 1; day <= 7; day++) {
       for (let hour = 0; hour < 24; hour++) {
@@ -1325,7 +1373,7 @@ app.get('/api/analytics/order-activity', auth(['admin', 'manager']), checkPermis
           row.day === day && row.hour === hour
         );
         heatmapData.push({
-          day: day - 1, // 0-based for chart (Monday=0)
+          day: day - 1,
           hour,
           orderCount: entry ? Number(entry.orderCount) : 0,
         });
@@ -1336,6 +1384,150 @@ app.get('/api/analytics/order-activity', auth(['admin', 'manager']), checkPermis
   } catch (err) {
     console.error('Get order activity heatmap error:', err.message);
     res.status(500).json({ message: 'Server error fetching heatmap data' });
+  }
+});
+
+// Submit a return request (authenticated users only)
+app.post('/api/returns', auth(['user']), async (req, res) => {
+  const { orderId, productName, reason } = req.body;
+  if (!orderId || !productName || !reason) {
+    return res.status(400).json({ message: 'Order ID, product name, and reason are required' });
+  }
+
+  try {
+    // Verify order exists and belongs to user
+    const [orders] = await db.execute(
+      `SELECT o.id, oi.product_name
+       FROM orders o
+       JOIN order_items oi ON o.id = oi.order_id
+       WHERE o.id = ? AND o.user_id = ? AND oi.product_name = ?`,
+      [orderId, req.user.id, productName]
+    );
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Order or product not found' });
+    }
+
+    const [result] = await db.execute(
+      'INSERT INTO returns (order_id, user_id, product_name, reason, status) VALUES (?, ?, ?, ?, ?)',
+      [orderId, req.user.id, productName, reason, 'Pending']
+    );
+
+    const [newReturn] = await db.execute(
+      `SELECT r.id, r.order_id, r.user_id, u.name as customerName, r.product_name, r.reason, r.status, r.created_at
+       FROM returns r
+       JOIN users u ON r.user_id = u.id
+       WHERE r.id = ?`,
+      [result.insertId]
+    );
+
+    broadcast({ type: 'newReturn', return: newReturn[0] });
+    res.status(201).json({ message: 'Return request submitted', returnId: result.insertId });
+  } catch (err) {
+    console.error('Submit return error:', err.message);
+    res.status(500).json({ message: 'Server error submitting return request' });
+  }
+});
+
+// Get all return requests (Admin and Manager)
+app.get('/api/returns', auth(['admin', 'manager']), checkPermission('returns', 'view'), async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT r.id, r.order_id, r.user_id, u.name as customerName, r.product_name, r.reason, r.status, r.created_at
+       FROM returns r
+       JOIN users u ON r.user_id = u.id`
+    );
+    res.json(rows.map(row => ({
+      id: row.id,
+      orderId: row.order_id,
+      userId: row.user_id,
+      customerName: row.customerName,
+      productName: row.product_name,
+      reason: row.reason,
+      status: row.status,
+      createdAt: row.created_at
+    })));
+  } catch (err) {
+    console.error('Get return requests error:', err.message);
+    res.status(500).json({ message: 'Server error fetching return requests' });
+  }
+});
+
+// Get single return request by ID (Admin and Manager)
+app.get('/api/returns/:id', auth(['admin', 'manager']), checkPermission('returns', 'view'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await db.execute(
+      `SELECT r.id, r.order STACK TRACE: id, r.user_id, u.name as customerName, r.product_name, r.reason, r.status, r.created_at
+       FROM returns r
+       JOIN users u ON r.user_id = u.id
+       WHERE r.id = ?`,
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Return request not found' });
+    }
+    res.json({
+      id: rows[0].id,
+      orderId: rows[0].order_id,
+      userId: rows[0].user_id,
+      customerName: rows[0].customerName,
+      productName: rows[0].product_name,
+      reason: rows[0].reason,
+      status: rows[0].status,
+      createdAt: rows[0].created_at
+    });
+  } catch (err) {
+    console.error('Get return request error:', err.message);
+    res.status(500).json({ message: 'Server error fetching return request' });
+  }
+});
+
+// Approve a return request (Admin and Manager)
+app.put('/api/returns/:id/approve', auth(['admin', 'manager']), checkPermission('returns', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [existing] = await db.execute('SELECT status, product_name FROM returns WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Return request not found' });
+    }
+    if (existing[0].status !== 'Pending') {
+      return res.status(400).json({ message: 'Return request is not in pending status' });
+    }
+
+    await db.execute('UPDATE returns SET status = ? WHERE id = ?', ['Approved', id]);
+
+    // Optionally, restock the product
+    await db.execute(
+      'UPDATE products SET stock = stock + 1 WHERE name = ?',
+      [existing[0].product_name]
+    );
+
+    broadcast({ type: 'returnStatusUpdate', id: Number(id), status: 'Approved' });
+    res.json({ message: 'Return request approved' });
+  } catch (err) {
+    console.error('Approve return error:', err.message);
+    res.status(500).json({ message: 'Server error approving return request' });
+  }
+});
+
+// Reject a return request (Admin and Manager)
+app.put('/api/returns/:id/reject', auth(['admin', 'manager']), checkPermission('returns', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [existing] = await db.execute('SELECT status FROM returns WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Return request not found' });
+    }
+    if (existing[0].status !== 'Pending') {
+      return res.status(400).json({ message: 'Return request is not in pending status' });
+    }
+
+    await db.execute('UPDATE returns SET status = ? WHERE id = ?', ['Rejected', id]);
+    broadcast({ type: 'returnStatusUpdate', id: Number(id), status: 'Rejected' });
+    res.json({ message: 'Return request rejected' });
+  } catch (err) {
+    console.error('Reject return error:', err.message);
+    res.status(500).json({ message: 'Server error rejecting return request' });
   }
 });
 
