@@ -1,4 +1,3 @@
-// src/context/AuthContext.jsx
 import React, { createContext, useState, useEffect } from 'react';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
@@ -10,6 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(null);
   const [permissions, setPermissions] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [returns, setReturns] = useState([]);
   const [wishlist, setWishlist] = useState([]);
 
   useEffect(() => {
@@ -23,9 +23,10 @@ export const AuthProvider = ({ children }) => {
         if (['admin', 'manager', 'staff'].includes(decoded.role)) {
           fetchPermissions(token, decoded.id);
         } else {
-          setPermissions({}); // Regular users have no permissions
+          setPermissions({});
+          fetchUserOrders(token);
+          fetchUserReturns(token);
         }
-        if (decoded.role === 'user') fetchUserOrders(token);
       } catch (err) {
         console.error('Invalid token:', err);
         logout();
@@ -54,7 +55,30 @@ export const AuthProvider = ({ children }) => {
         admins: { view: false, create: false, edit: false, delete: false },
         analytics: { view: false, create: false, edit: false, delete: false },
         roles: { view: false, create: false, edit: false, delete: false },
+        returns: { view: false, edit: false },
       });
+    }
+  };
+
+  const fetchUserOrders = async (token) => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/user/orders', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setOrders(res.data);
+    } catch (err) {
+      console.error('Error fetching user orders:', err.message);
+    }
+  };
+
+  const fetchUserReturns = async (token) => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/user/returns', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setReturns(res.data);
+    } catch (err) {
+      console.error('Error fetching user returns:', err.message);
     }
   };
 
@@ -78,8 +102,9 @@ export const AuthProvider = ({ children }) => {
         await fetchPermissions(res.data.token, decoded.id);
       } else {
         setPermissions({});
+        fetchUserOrders(res.data.token);
+        fetchUserReturns(res.data.token);
       }
-      if (res.data.user.role === 'user') fetchUserOrders(res.data.token);
     } catch (err) {
       throw err.response?.data || { message: 'Login failed' };
     }
@@ -107,18 +132,8 @@ export const AuthProvider = ({ children }) => {
     setRole(null);
     setPermissions(null);
     setOrders([]);
+    setReturns([]);
     setWishlist([]);
-  };
-
-  const fetchUserOrders = async (token) => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/user/orders', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setOrders(res.data);
-    } catch (err) {
-      console.error('Error fetching user orders:', err.message);
-    }
   };
 
   const addOrder = async (orderData) => {
@@ -188,6 +203,7 @@ export const AuthProvider = ({ children }) => {
         adminLogin,
         logout,
         orders,
+        returns,
         addOrder,
         updateOrder,
         wishlist,
