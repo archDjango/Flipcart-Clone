@@ -825,8 +825,239 @@ app.post('/api/reviews/:id/respond', auth(['admin', 'manager']), checkPermission
   }
 });
 
+// Seller Management Endpoints
+// Add a new seller (Admin only)
+app.post('/api/sellers', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
+  const { name, company_name, email, phone } = req.body;
+  if (!name || !company_name || !email) {
+    return res.status(400).json({ message: 'Name, company name, and email are required' });
+  }
+
+  try {
+    const [result] = await db.execute(
+      'INSERT INTO sellers (name, company_name, email, phone, status) VALUES (?, ?, ?, ?, ?)',
+      [name, company_name, email, phone || null, 'Pending']
+    );
+    const [newSeller] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [result.insertId]
+    );
+    broadcast({ type: 'newSeller', seller: newSeller[0] });
+    res.status(201).json({
+      id: newSeller[0].id,
+      name: newSeller[0].name,
+      companyName: newSeller[0].company_name,
+      email: newSeller[0].email,
+      phone: newSeller[0].phone,
+      status: newSeller[0].status,
+      createdAt: newSeller[0].created_at
+    });
+  } catch (err) {
+    console.error('Add seller error:', err.message);
+    res.status(400).json({ message: err.code === 'ER_DUP_ENTRY' ? 'Email already registered' : 'Server error' });
+  }
+});
+
+// Get all sellers (Admin only)
+app.get('/api/sellers', auth(['admin']), checkPermission('sellers', 'view'), async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers'
+    );
+    res.json(rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      companyName: row.company_name,
+      email: row.email,
+      phone: row.phone,
+      status: row.status,
+      createdAt: row.created_at
+    })));
+  } catch (err) {
+    console.error('Get sellers error:', err.message);
+    res.status(500).json({ message: 'Server error fetching sellers' });
+  }
+});
+
+// Get seller details by ID (Admin only)
+app.get('/api/sellers/:id', auth(['admin']), checkPermission('sellers', 'view'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+    res.json({
+      id: rows[0].id,
+      name: rows[0].name,
+      companyName: rows[0].company_name,
+      email: rows[0].email,
+      phone: rows[0].phone,
+      status: rows[0].status,
+      createdAt: rows[0].created_at
+    });
+  } catch (err) {
+    console.error('Get seller details error:', err.message);
+    res.status(500).json({ message: 'Server error fetching seller details' });
+  }
+});
+
+// Approve a seller (Admin only)
+app.put('/api/sellers/:id/approve', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [existing] = await db.execute('SELECT status FROM sellers WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+    if (existing[0].status !== 'Pending') {
+      return res.status(400).json({ message: 'Seller is not in pending status' });
+    }
+    await db.execute('UPDATE sellers SET status = ? WHERE id = ?', ['Approved', id]);
+    const [updated] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [id]
+    );
+    broadcast({ type: 'sellerStatusUpdate', id: Number(id), status: 'Approved', seller: updated[0] });
+    res.json({ message: 'Seller approved', seller: updated[0] });
+  } catch (err) {
+    console.error('Approve seller error:', err.message);
+    res.status(500).json({ message: 'Server error approving seller' });
+  }
+});
+
+// Block a seller (Admin only)
+app.put('/api/sellers/:id/block', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [existing] = await db.execute('SELECT status FROM sellers WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+    if (existing[0].status !== 'Approved') {
+      return res.status(400).json({ message: 'Seller is not in approved status' });
+    }
+    await db.execute('UPDATE sellers SET status = ? WHERE id = ?', ['Blocked', id]);
+    const [updated] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [id]
+    );
+    broadcast({ type: 'sellerStatusUpdate', id: Number(id), status: 'Blocked', seller: updated[0] });
+    res.json({ message: 'Seller blocked', seller: updated[0] });
+  } catch (err) {
+    console.error('Block seller error:', err.message);
+    res.status(500).json({ message: 'Server error blocking seller' });
+  }
+});
+
+// Unblock a seller (Admin only)
+app.put('/api/sellers/:id/unblock', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [existing] = await db.execute('SELECT status FROM sellers WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+    if (existing[0].status !== 'Blocked') {
+      return res.status(400).json({ message: 'Seller is not in blocked status' });
+    }
+    await db.execute('UPDATE sellers SET status = ? WHERE id = ?', ['Approved', id]);
+    const [updated] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [id]
+    );
+    broadcast({ type: 'sellerStatusUpdate', id: Number(id), status: 'Approved', seller: updated[0] });
+    res.json({ message: 'Seller unblocked', seller: updated[0] });
+  } catch (err) {
+    console.error('Unblock seller error:', err.message);
+    res.status(500).json({ message: 'Server error unblocking seller' });
+  }
+});
+
 // Role Management Endpoints
-// Role Management Endpoints
+// Fetch user roles and permissions
+app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermission('users', 'view'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Fetch role_id from user_roles instead of users
+    const [userRoles] = await db.execute('SELECT role_id FROM user_roles WHERE user_id = ?', [id]);
+    if (!userRoles.length) {
+      return res.status(404).json({ message: 'No roles assigned to user' });
+    }
+
+    const roleId = userRoles[0].role_id;
+
+    // Fetch role and permissions
+    const [roles] = await db.execute('SELECT * FROM roles WHERE id = ?', [roleId]);
+    if (!roles.length) {
+      return res.status(404).json({ message: 'Role not found for user' });
+    }
+
+    const role = roles[0];
+    const permissions = {
+      products: {
+        view: role.products_view,
+        create: role.products_create,
+        edit: role.products_edit,
+        delete: role.products_delete,
+      },
+      orders: {
+        view: role.orders_view,
+        create: role.orders_create,
+        edit: role.orders_edit,
+        delete: role.orders_delete,
+      },
+      reviews: {
+        view: role.reviews_view,
+        create: role.reviews_create,
+        edit: role.reviews_edit,
+        delete: role.reviews_delete,
+      },
+      users: {
+        view: role.users_view,
+        create: role.users_create,
+        edit: role.users_edit,
+        delete: role.users_delete,
+      },
+      admins: {
+        view: role.admins_view,
+        create: role.admins_create,
+        edit: role.admins_edit,
+        delete: role.admins_delete,
+      },
+      analytics: {
+        view: role.analytics_view,
+        create: role.analytics_create,
+        edit: role.analytics_edit,
+        delete: role.analytics_delete,
+      },
+      roles: {
+        view: role.roles_view,
+        create: role.roles_create,
+        edit: role.roles_edit,
+        delete: role.roles_delete,
+      },
+      returns: {
+        view: role.returns_view,
+        edit: role.returns_edit,
+      },
+      sellers: {
+        view: role.sellers_view,
+        edit: role.sellers_edit,
+      },
+    };
+
+    res.json({ role: role.name, permissions });
+  } catch (err) {
+    console.error('Error in /api/users/:id/roles:', err);
+    res.status(500).json({ message: 'Server error while fetching roles', error: err.message });
+  }
+});
+
+// Get all roles (unchanged, included for consistency)
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
   try {
     console.log('GET /api/roles called by user:', req.user);
@@ -839,7 +1070,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
-              returns_view, returns_edit
+              returns_view, returns_edit,
+              sellers_view, sellers_edit
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -893,6 +1125,10 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
           view: row.returns_view,
           edit: row.returns_edit,
         },
+        sellers: {
+          view: row.sellers_view,
+          edit: row.sellers_edit,
+        }
       }
     })));
   } catch (err) {
@@ -900,6 +1136,7 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 
 app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), async (req, res) => {
   const { name, description, permissions } = req.body;
@@ -916,8 +1153,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         admins_view, admins_create, admins_edit, admins_delete,
         analytics_view, analytics_create, analytics_edit, analytics_delete,
         roles_view, roles_create, roles_edit, roles_delete,
-        returns_view, returns_edit
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        returns_view, returns_edit,
+        sellers_view, sellers_edit
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -951,6 +1189,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.roles.delete || false,
         permissions.returns.view || false,
         permissions.returns.edit || false,
+        permissions.sellers.view || false,
+        permissions.sellers.edit || false,
       ]
     );
     const [newRole] = await db.execute(
@@ -962,7 +1202,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
-              returns_view, returns_edit
+              returns_view, returns_edit,
+              sellers_view, sellers_edit
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -1017,6 +1258,10 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
           view: newRole[0].returns_view,
           edit: newRole[0].returns_edit,
         },
+        sellers: {
+          view: newRole[0].sellers_view,
+          edit: newRole[0].sellers_edit,
+        }
       }
     });
   } catch (err) {
@@ -1041,7 +1286,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         admins_view = ?, admins_create = ?, admins_edit = ?, admins_delete = ?,
         analytics_view = ?, analytics_create = ?, analytics_edit = ?, analytics_delete = ?,
         roles_view = ?, roles_create = ?, roles_edit = ?, roles_delete = ?,
-        returns_view = ?, returns_edit = ?
+        returns_view = ?, returns_edit = ?,
+        sellers_view = ?, sellers_edit = ?
        WHERE id = ?`,
       [
         name,
@@ -1076,6 +1322,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.roles.delete || false,
         permissions.returns.view || false,
         permissions.returns.edit || false,
+        permissions.sellers.view || false,
+        permissions.sellers.edit || false,
         id
       ]
     );
@@ -1088,7 +1336,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               admins_view, admins_create, admins_edit, admins_delete,
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
-              returns_view, returns_edit
+              returns_view, returns_edit,
+              sellers_view, sellers_edit
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1144,6 +1393,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
           view: updatedRole[0].returns_view,
           edit: updatedRole[0].returns_edit,
         },
+        sellers: {
+          view: updatedRole[0].sellers_view,
+          edit: updatedRole[0].sellers_edit,
+        }
       }
     });
   } catch (err) {
@@ -1151,6 +1404,7 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 app.delete('/api/roles/:id', auth(['admin']), checkPermission('roles', 'delete'), async (req, res) => {
   const { id } = req.params;
   try {
@@ -1192,95 +1446,8 @@ app.put('/api/users/:id/role', auth(['admin']), checkPermission('roles', 'edit')
   }
 });
 
-// Fetch user roles and permissions
-app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), async (req, res) => {
-  const { id } = req.params;
-  if (req.user.id !== parseInt(id) && req.user.role !== 'admin') {
-    return res.status(403).json({ message: 'Unauthorized to view other users\' roles' });
-  }
-  try {
-    const [rows] = await db.execute(
-      `SELECT r.id, r.name, r.description,
-              r.products_view, r.products_create, r.products_edit, r.products_delete,
-              r.orders_view, r.orders_create, r.orders_edit, r.orders_delete,
-              r.reviews_view, r.reviews_create, r.reviews_edit, r.reviews_delete,
-              r.users_view, r.users_create, r.users_edit, r.users_delete,
-              r.admins_view, r.admins_create, r.admins_edit, r.admins_delete,
-              r.analytics_view, r.analytics_create, r.analytics_edit, r.analytics_delete,
-              r.roles_view, r.roles_create, r.roles_edit, r.roles_delete,
-              r.returns_view, r.returns_edit
-       FROM user_roles ur
-       JOIN roles r ON ur.role_id = r.id
-       WHERE ur.user_id = ?`,
-      [id]
-    );
-    if (rows.length === 0) {
-      console.log(`No roles found for user_id: ${id}`);
-      return res.json({ roles: [], permissions: {} });
-    }
-    console.log('Raw permissions data:', rows[0]);
-    const permissions = {
-      products: {
-        view: rows[0].products_view,
-        create: rows[0].products_create,
-        edit: rows[0].products_edit,
-        delete: rows[0].products_delete,
-      },
-      orders: {
-        view: rows[0].orders_view,
-        create: rows[0].orders_create,
-        edit: rows[0].orders_edit,
-        delete: rows[0].orders_delete,
-      },
-      reviews: {
-        view: rows[0].reviews_view,
-        create: rows[0].reviews_create,
-        edit: rows[0].reviews_edit,
-        delete: rows[0].reviews_delete,
-      },
-      users: {
-        view: rows[0].users_view,
-        create: rows[0].users_create,
-        edit: rows[0].users_edit,
-        delete: rows[0].users_delete,
-      },
-      admins: {
-        view: rows[0].admins_view,
-        create: rows[0].admins_create,
-        edit: rows[0].admins_edit,
-        delete: rows[0].admins_delete,
-      },
-      analytics: {
-        view: rows[0].analytics_view,
-        create: rows[0].analytics_create,
-        edit: rows[0].analytics_edit,
-        delete: rows[0].analytics_delete,
-      },
-      roles: {
-        view: rows[0].roles_view,
-        create: rows[0].roles_create,
-        edit: rows[0].roles_edit,
-        delete: rows[0].roles_delete,
-      },
-      returns: {
-        view: rows[0].returns_view,
-        edit: rows[0].returns_edit,
-      },
-    };
-    res.json({
-      roles: rows.map(row => ({
-        id: row.id,
-        name: row.name,
-        description: row.description,
-      })),
-      permissions
-    });
-  } catch (err) {
-    console.error('Get user roles error:', err.message, err.stack);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
 
+// ... other routes and server setup ...
 // New Payment Methods Analytics Endpoint
 app.get('/api/payment-methods-analytics', auth(['admin', 'manager']), checkPermission('analytics', 'view'), async (req, res) => {
   try {
@@ -1457,7 +1624,7 @@ app.get('/api/returns/:id', auth(['admin', 'manager']), checkPermission('returns
   const { id } = req.params;
   try {
     const [rows] = await db.execute(
-      `SELECT r.id, r.order STACK TRACE: id, r.user_id, u.name as customerName, r.product_name, r.reason, r.status, r.created_at
+      `SELECT r.id, r.order_id, r.user_id, u.name as customerName, r.product_name, r.reason, r.status, r.created_at
        FROM returns r
        JOIN users u ON r.user_id = u.id
        WHERE r.id = ?`,
@@ -1528,6 +1695,65 @@ app.put('/api/returns/:id/reject', auth(['admin', 'manager']), checkPermission('
   } catch (err) {
     console.error('Reject return error:', err.message);
     res.status(500).json({ message: 'Server error rejecting return request' });
+  }
+});
+
+
+// Add a new seller (Admin only)
+app.post('/api/sellers', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
+  const { name, company_name, email, phone } = req.body;
+  if (!name || !company_name || !email) {
+    return res.status(400).json({ message: 'Name, company name, and email are required' });
+  }
+
+  try {
+    const [result] = await db.execute(
+      'INSERT INTO sellers (name, company_name, email, phone, status) VALUES (?, ?, ?, ?, ?)',
+      [name, company_name, email, phone || null, 'Pending']
+    );
+    const [newSeller] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [result.insertId]
+    );
+    broadcast({ type: 'newSeller', seller: newSeller[0] });
+    res.status(201).json({
+      id: newSeller[0].id,
+      name: newSeller[0].name,
+      companyName: newSeller[0].company_name,
+      email: newSeller[0].email,
+      phone: newSeller[0].phone,
+      status: newSeller[0].status,
+      createdAt: newSeller[0].created_at
+    });
+  } catch (err) {
+    console.error('Add seller error:', err.message);
+    res.status(400).json({ message: err.code === 'ER_DUP_ENTRY' ? 'Email already registered' : 'Server error' });
+  }
+});
+
+// Get seller details by ID (Admin only)
+app.get('/api/sellers/:id', auth(['admin']), checkPermission('sellers', 'view'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, name, company_name, email, phone, status, created_at FROM sellers WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Seller not found' });
+    }
+    res.json({
+      id: rows[0].id,
+      name: rows[0].name,
+      companyName: rows[0].company_name,
+      email: rows[0].email,
+      phone: rows[0].phone,
+      status: rows[0].status,
+      createdAt: rows[0].created_at
+    });
+  } catch (err) {
+    console.error('Get seller details error:', err.message);
+    res.status(500).json({ message: 'Server error fetching seller details' });
   }
 });
 
