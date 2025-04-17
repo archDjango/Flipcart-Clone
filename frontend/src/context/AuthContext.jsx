@@ -56,6 +56,7 @@ export const AuthProvider = ({ children }) => {
         analytics: { view: false, create: false, edit: false, delete: false },
         roles: { view: false, create: false, edit: false, delete: false },
         returns: { view: false, edit: false },
+        sellers: { view: false, edit: false }, // ADDED: Initialize sellers permissions
       });
     }
   };
