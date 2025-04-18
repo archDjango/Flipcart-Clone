@@ -11,6 +11,8 @@ export const AuthProvider = ({ children }) => {
   const [orders, setOrders] = useState([]);
   const [returns, setReturns] = useState([]);
   const [wishlist, setWishlist] = useState([]);
+  const [inventoryTransactions, setInventoryTransactions] = useState([]);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -22,6 +24,8 @@ export const AuthProvider = ({ children }) => {
         setRole(decoded.role);
         if (['admin', 'manager', 'staff'].includes(decoded.role)) {
           fetchPermissions(token, decoded.id);
+          fetchInventoryTransactions(token);
+          fetchLowStockAlerts(token);
         } else {
           setPermissions({});
           fetchUserOrders(token);
@@ -56,7 +60,8 @@ export const AuthProvider = ({ children }) => {
         analytics: { view: false, create: false, edit: false, delete: false },
         roles: { view: false, create: false, edit: false, delete: false },
         returns: { view: false, edit: false },
-        sellers: { view: false, edit: false }, // ADDED: Initialize sellers permissions
+        sellers: { view: false, edit: false },
+        inventory: { view: false, edit: false, restock: false, transactions_view: false },
       });
     }
   };
@@ -68,7 +73,7 @@ export const AuthProvider = ({ children }) => {
       });
       setOrders(res.data);
     } catch (err) {
-      console.error('Error fetching user orders:', err.message);
+      console.error('Error fetching user orders:', err.message, err.response?.status);
     }
   };
 
@@ -79,7 +84,43 @@ export const AuthProvider = ({ children }) => {
       });
       setReturns(res.data);
     } catch (err) {
-      console.error('Error fetching user returns:', err.message);
+      console.error('Error fetching user returns:', err.message, err.response?.status);
+    }
+  };
+
+  const fetchInventoryTransactions = async (token, filters = {}) => {
+    try {
+      const { product_id, start_date, end_date, transaction_type } = filters;
+      const params = {};
+      if (product_id) params.product_id = product_id;
+      if (start_date) params.start_date = start_date;
+      if (end_date) params.end_date = end_date;
+      if (transaction_type) params.transaction_type = transaction_type;
+
+      const res = await axios.get('http://localhost:5000/api/inventory/transactions', {
+        headers: { Authorization: `Bearer ${token}` },
+        params,
+      });
+      setInventoryTransactions(res.data);
+      return res.data;
+    } catch (err) {
+      console.error('Error fetching inventory transactions:', err.message, err.response?.status);
+      return [];
+    }
+  };
+
+  const fetchLowStockAlerts = async (token, status = 'active') => {
+    try {
+      const params = status !== null ? { status } : {};
+      const res = await axios.get('http://localhost:5000/api/inventory/low-stock-alerts', {
+        headers: { Authorization: `Bearer ${token}` },
+        params,
+      });
+      setLowStockAlerts(res.data);
+      return res.data;
+    } catch (err) {
+      console.error('Error fetching low stock alerts:', err.message, err.response?.status);
+      return [];
     }
   };
 
@@ -101,6 +142,8 @@ export const AuthProvider = ({ children }) => {
       setRole(res.data.user.role);
       if (['admin', 'manager', 'staff'].includes(res.data.user.role)) {
         await fetchPermissions(res.data.token, decoded.id);
+        await fetchInventoryTransactions(res.data.token);
+        await fetchLowStockAlerts(res.data.token);
       } else {
         setPermissions({});
         fetchUserOrders(res.data.token);
@@ -121,6 +164,8 @@ export const AuthProvider = ({ children }) => {
       setUser(res.data.user);
       setRole(res.data.user.role);
       await fetchPermissions(res.data.token, decoded.id);
+      await fetchInventoryTransactions(res.data.token);
+      await fetchLowStockAlerts(res.data.token);
     } catch (err) {
       console.error('Admin login error:', err.response?.data || err.message);
       throw err.response?.data || { message: 'Admin login failed' };
@@ -135,6 +180,8 @@ export const AuthProvider = ({ children }) => {
     setOrders([]);
     setReturns([]);
     setWishlist([]);
+    setInventoryTransactions([]);
+    setLowStockAlerts([]);
   };
 
   const addOrder = async (orderData) => {
@@ -147,6 +194,38 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('Add order error:', err.response?.data || err.message);
       return { success: false, message: err.response?.data?.message || 'Failed to add order' };
+    }
+  };
+
+  const restockProduct = async (productId, quantity) => {
+    try {
+      const res = await axios.post(
+        `http://localhost:5000/api/products/${productId}/restock`,
+        { quantity },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      await fetchInventoryTransactions(localStorage.getItem('token'), { product_id: productId });
+      return { success: true, product: res.data };
+    } catch (err) {
+      console.error('Restock product error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to restock product' };
+    }
+  };
+
+  const acknowledgeLowStockAlert = async (alertId) => {
+    try {
+      await axios.put(
+        `http://localhost:5000/api/inventory/low-stock-alerts/${alertId}/acknowledge`,
+        {},
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setLowStockAlerts(lowStockAlerts.map(alert =>
+        alert.id === alertId ? { ...alert, status: 'resolved', acknowledged: true } : alert
+      ));
+      return { success: true };
+    } catch (err) {
+      console.error('Acknowledge low stock alert error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to acknowledge alert' };
     }
   };
 
@@ -212,6 +291,12 @@ export const AuthProvider = ({ children }) => {
         removeFromWishlist,
         getUsers,
         deleteUser,
+        inventoryTransactions,
+        lowStockAlerts,
+        fetchInventoryTransactions,
+        fetchLowStockAlerts,
+        restockProduct,
+        acknowledgeLowStockAlert,
       }}
     >
       {children}
