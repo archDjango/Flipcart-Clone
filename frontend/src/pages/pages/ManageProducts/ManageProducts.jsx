@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import axios from 'axios';
 import Papa from 'papaparse';
 import imageCompression from 'browser-image-compression';
 import { Tooltip } from 'react-tooltip';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { AuthContext } from '../../context/AuthContext';
 import './ManageProducts.css';
 
 const PRODUCTS_PER_PAGE = 10;
@@ -16,7 +17,8 @@ const filterProducts = (products, search, categoryFilter, stockFilter) =>
     const matchesStock =
       stockFilter === 'all' ? true :
       stockFilter === 'inStock' ? p.stock > 0 :
-      p.stock === 0;
+      stockFilter === 'outOfStock' ? p.stock === 0 :
+      stockFilter === 'lowStock' ? p.alert_status === 'active' : true;
     return matchesSearch && matchesCategory && matchesStock;
   });
 
@@ -27,10 +29,11 @@ const sortProducts = (products, sortField, sortOrder) =>
   });
 
 const ManageProducts = () => {
+  const { permissions, restockProduct, fetchInventoryTransactions, fetchLowStockAlerts, acknowledgeLowStockAlert } = useContext(AuthContext);
   const [products, setProducts] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [form, setForm] = useState({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null });
+  const [form, setForm] = useState({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null, low_stock_threshold: '', seller_id: '' });
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -46,22 +49,78 @@ const ManageProducts = () => {
   const [aiPrompt, setAiPrompt] = useState({ title: '', category: '', keywords: '' });
   const [generatedDescription, setGeneratedDescription] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [restockModalOpen, setRestockModalOpen] = useState(false);
+  const [restockForm, setRestockForm] = useState({ productId: null, quantity: '' });
+  const [transactionsModalOpen, setTransactionsModalOpen] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const [sellers, setSellers] = useState([]);
 
   useEffect(() => {
+    if (!permissions?.products?.view) {
+      setError('You do not have permission to view products');
+      setLoading(false);
+      return;
+    }
     fetchProducts();
+    fetchSellers();
+    if (permissions?.inventory?.view) {
+      fetchLowStockAlertsData();
+    }
     const ws = new WebSocket('ws://localhost:5001');
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'lowStock') {
-        setProducts(prev => prev.map(p => data.products.find(lp => lp.id === p.id) || p));
-      } else if (data.deleted) {
-        setProducts(prev => prev.filter(p => p.id !== data.id));
-      } else {
-        setProducts(prev => prev.map(p => p.id === data.id ? data : p));
+      try {
+        const data = JSON.parse(event.data);
+        if (!data) return;
+
+        if (data.type === 'lowStock' && data.product) {
+          setLowStockAlerts(prev => {
+            const newAlert = {
+              id: data.alert_id || Date.now(),
+              product_id: data.product.id,
+              product_name: data.product.name,
+              stock: data.product.stock,
+              threshold: data.product.low_stock_threshold,
+              status: 'active',
+              created_at: new Date(),
+              acknowledged: false
+            };
+            return [...prev, ...[newAlert].filter(a => !prev.some(p => p.product_id === a.product_id && p.status === 'active'))];
+          });
+          setProducts(prev => prev.map(p =>
+            p.id === data.product.id ? { ...p, stock: data.product.stock, alert_id: data.alert_id || null, alert_status: 'active' } : p
+          ));
+        } else if (data.type === 'restock' && data.product) {
+          setProducts(prev => prev.map(p =>
+            p.id === data.product.id ? { ...p, stock: data.product.stock, alert_id: data.alert_id || null, alert_status: data.product.stock > p.low_stock_threshold ? null : p.alert_status } : p
+          ));
+          setLowStockAlerts(prev => prev.map(a =>
+            a.product_id === data.product.id && data.product.stock > a.threshold
+              ? { ...a, status: 'resolved', acknowledged: true }
+              : a
+          ));
+          toast.info(`Product ${data.product.name} restocked`);
+        } else if (data.type === 'lowStockAcknowledged' && data.alert_id) {
+          setLowStockAlerts(prev => prev.map(a =>
+            a.id === data.alert_id ? { ...a, status: 'resolved', acknowledged: true } : a
+          ));
+          setProducts(prev => prev.map(p =>
+            p.id === data.product_id ? { ...p, alert_status: 'resolved' } : p
+          ));
+          toast.success('Low stock alert acknowledged');
+        } else if (data.deleted && data.id) {
+          setProducts(prev => prev.filter(p => p.id !== data.id));
+          setLowStockAlerts(prev => prev.filter(a => a.product_id !== data.id));
+        } else if (data.id) {
+          setProducts(prev => prev.map(p => p.id === data.id ? { ...data, alert_id: data.alert_id || null, alert_status: data.alert_status || null } : p));
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
       }
     };
+    ws.onerror = (err) => console.error('WebSocket error:', err);
     return () => ws.close();
-  }, []);
+  }, [permissions]);
 
   useEffect(() => {
     let timer;
@@ -88,13 +147,38 @@ const ManageProducts = () => {
     try {
       const res = await axios.get('http://localhost:5000/api/products', {
         headers: { Authorization: `Bearer ${token}` },
+        params: { low_stock: stockFilter === 'lowStock' ? 'true' : undefined }
       });
       setProducts(res.data);
       setError('');
     } catch (err) {
       setError('Failed to fetch products: ' + (err.response?.data?.message || 'Unknown error'));
+      toast.error('Failed to fetch products');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSellers = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await axios.get('http://localhost:5000/api/sellers', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { status: 'Approved' }
+      });
+      setSellers(res.data);
+    } catch (err) {
+      toast.error('Failed to fetch sellers');
+    }
+  };
+
+  const fetchLowStockAlertsData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const alerts = await fetchLowStockAlerts(token, 'active');
+      setLowStockAlerts(alerts);
+    } catch (err) {
+      toast.error('Failed to fetch low stock alerts');
     }
   };
 
@@ -104,6 +188,7 @@ const ManageProducts = () => {
     if (!form.price || isNaN(form.price) || form.price <= 0) newErrors.price = 'Price must be a positive number';
     if (!form.stock || isNaN(form.stock) || form.stock < 0) newErrors.stock = 'Stock must be a non-negative number';
     if (!form.category.trim()) newErrors.category = 'Category is required';
+    if (!form.low_stock_threshold || isNaN(form.low_stock_threshold) || form.low_stock_threshold < 0) newErrors.low_stock_threshold = 'Low stock threshold must be a non-negative number';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -143,15 +228,15 @@ const ManageProducts = () => {
     formData.append('price', form.price);
     formData.append('stock', form.stock);
     formData.append('category', form.category);
-    // Always append description, even if empty, to avoid undefined
     formData.append('description', form.description || '');
-    // Only append image if a new file is selected; otherwise, rely on backend to keep existing image
+    formData.append('low_stock_threshold', form.low_stock_threshold);
+    formData.append('seller_id', form.seller_id || '');
     if (form.image instanceof File) {
       formData.append('image', form.image);
     } else if (editMode && form.image) {
-      formData.append('image', form.image); // Send existing image path if no new upload
+      formData.append('image', form.image);
     }
-  
+
     try {
       const res = editMode
         ? await axios.put(`http://localhost:5000/api/products/${form.id}`, formData, {
@@ -160,7 +245,10 @@ const ManageProducts = () => {
         : await axios.post('http://localhost:5000/api/products', formData, {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
           });
-      setProducts(editMode ? products.map(p => p.id === form.id ? res.data : p) : [...products, res.data]);
+      setProducts(editMode
+        ? products.map(p => p.id === form.id ? { ...res.data, alert_id: res.data.alert_id || null, alert_status: res.data.alert_status || null } : p)
+        : [...products, { ...res.data, alert_id: res.data.alert_id || null, alert_status: res.data.alert_status || null }]
+      );
       closeModal();
       toast.success(editMode ? 'Product updated successfully!' : 'Product added successfully!');
     } catch (err) {
@@ -170,7 +258,12 @@ const ManageProducts = () => {
   };
 
   const handleEdit = (product) => {
-    setForm({ ...product, image: null });
+    setForm({
+      ...product,
+      image: null,
+      low_stock_threshold: product.low_stock_threshold || 10,
+      seller_id: product.seller_id || ''
+    });
     setEditMode(true);
     setModalOpen(true);
   };
@@ -183,6 +276,7 @@ const ManageProducts = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       setProducts(products.filter(p => p.id !== id));
+      setLowStockAlerts(prev => prev.filter(a => a.product_id !== id));
       toast.success('Product deleted successfully!');
     } catch (err) {
       setError('Failed to delete product: ' + (err.response?.data?.message || 'Unknown error'));
@@ -200,6 +294,7 @@ const ManageProducts = () => {
         data: { ids: selectedProducts },
       });
       setProducts(products.filter(p => !selectedProducts.includes(p.id)));
+      setLowStockAlerts(prev => prev.filter(a => !selectedProducts.includes(a.product_id)));
       setSelectedProducts([]);
       toast.success(`${selectedProducts.length} products deleted successfully!`);
     } catch (err) {
@@ -222,16 +317,22 @@ const ManageProducts = () => {
           stock: Number(row.stock),
           category: row.category,
           description: row.description || '',
+          low_stock_threshold: Number(row.low_stock_threshold) || 10,
+          seller_id: row.seller_id || '',
         }));
         try {
-          await Promise.all(
+          const responses = await Promise.all(
             newProducts.map(product =>
               axios.post('http://localhost:5000/api/products', product, {
                 headers: { Authorization: `Bearer ${token}` },
               })
             )
           );
-          fetchProducts();
+          setProducts(prev => [...prev, ...responses.map(res => ({
+            ...res.data,
+            alert_id: res.data.alert_id || null,
+            alert_status: res.data.alert_status || null
+          }))]);
           setCsvFile(null);
           toast.success('Products imported successfully!');
         } catch (err) {
@@ -242,8 +343,68 @@ const ManageProducts = () => {
     });
   };
 
+  const openRestockModal = (product) => {
+    setRestockForm({ productId: product.id, quantity: '' });
+    setRestockModalOpen(true);
+  };
+
+  const closeRestockModal = () => {
+    setRestockModalOpen(false);
+    setRestockForm({ productId: null, quantity: '' });
+  };
+
+  const handleRestockSubmit = async (e) => {
+    e.preventDefault();
+    if (!restockForm.quantity || isNaN(restockForm.quantity) || restockForm.quantity <= 0) {
+      toast.error('Quantity must be a positive number');
+      return;
+    }
+    const result = await restockProduct(restockForm.productId, Number(restockForm.quantity));
+    if (result.success) {
+      setProducts(prev => prev.map(p =>
+        p.id === restockForm.productId
+          ? { ...p, stock: result.product.stock, alert_status: result.product.stock > p.low_stock_threshold ? null : p.alert_status }
+          : p
+      ));
+      toast.success('Product restocked successfully!');
+      closeRestockModal();
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  const openTransactionsModal = async (productId) => {
+    try {
+      const transactionsData = await fetchInventoryTransactions({ product_id: productId });
+      setTransactions(transactionsData);
+      setTransactionsModalOpen(true);
+    } catch (err) {
+      toast.error('Failed to fetch transactions');
+    }
+  };
+
+  const closeTransactionsModal = () => {
+    setTransactionsModalOpen(false);
+    setTransactions([]);
+  };
+
+  const handleAcknowledgeAlert = async (alertId) => {
+    const result = await acknowledgeLowStockAlert(alertId);
+    if (result.success) {
+      setLowStockAlerts(prev => prev.map(a =>
+        a.id === alertId ? { ...a, status: 'resolved', acknowledged: true } : a
+      ));
+      setProducts(prev => prev.map(p =>
+        p.alert_id === alertId ? { ...p, alert_status: 'resolved' } : p
+      ));
+      toast.success('Alert acknowledged');
+    } else {
+      toast.error(result.message);
+    }
+  };
+
   const openModal = () => {
-    setForm({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null });
+    setForm({ id: '', name: '', price: '', stock: '', category: '', description: '', image: null, low_stock_threshold: '10', seller_id: '' });
     setEditMode(false);
     setModalOpen(true);
     setErrors({});
@@ -303,6 +464,42 @@ const ManageProducts = () => {
     <div className="manage-products">
       <ToastContainer position="top-right" autoClose={3000} />
       <h2>Manage Products</h2>
+      {permissions?.inventory?.view && lowStockAlerts.length > 0 && (
+        <div className="low-stock-alerts">
+          <h3>Low Stock Alerts</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Current Stock</th>
+                <th>Threshold</th>
+                <th>Status</th>
+                <th>Created At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lowStockAlerts.map(alert => (
+                <tr key={alert.id}>
+                  <td>{alert.product_name}</td>
+                  <td>{alert.stock}</td>
+                  <td>{alert.threshold}</td>
+                  <td>{alert.status.charAt(0).toUpperCase() + alert.status.slice(1)}</td>
+                  <td>{new Date(alert.created_at).toLocaleString()}</td>
+                  <td>
+                    {alert.status === 'active' && permissions?.inventory?.edit && (
+                      <button onClick={() => handleAcknowledgeAlert(alert.id)}>Acknowledge</button>
+                    )}
+                    {permissions?.inventory?.restock && (
+                      <button onClick={() => openRestockModal({ id: alert.product_id, name: alert.product_name })}>Restock</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="controls">
         <button className="add-btn" onClick={openModal} data-tooltip-id="tooltip" data-tooltip-content="Add a new product">
           Add Product
@@ -322,6 +519,7 @@ const ManageProducts = () => {
           <option value="all">All Stock Levels</option>
           <option value="inStock">In Stock</option>
           <option value="outOfStock">Out of Stock</option>
+          <option value="lowStock">Low Stock</option>
         </select>
         <button
           className="delete-selected-btn"
@@ -347,24 +545,39 @@ const ManageProducts = () => {
               <th onClick={() => handleSort('name')}>Name {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
               <th onClick={() => handleSort('price')}>Price {sortField === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
               <th onClick={() => handleSort('stock')}>Stock {sortField === 'stock' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('low_stock_threshold')}>Threshold {sortField === 'low_stock_threshold' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
               <th onClick={() => handleSort('category')}>Category {sortField === 'category' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th onClick={() => handleSort('seller_name')}>Seller {sortField === 'seller_name' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
               <th onClick={() => handleSort('created_at')}>Date Added {sortField === 'created_at' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+              <th>Alert Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {paginated.map(product => (
-              <tr key={product.id} className={product.stock < 10 ? 'low-stock' : ''}>
+              <tr key={product.id} className={product.alert_status === 'active' ? 'low-stock' : ''}>
                 <td><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={() => toggleSelectProduct(product.id)} /></td>
                 <td>{product.id}</td>
-                <td>{product.name} {product.stock < 10 && <span className="low-stock-badge">Low</span>}</td>
+                <td>
+                  {product.name}
+                  {product.alert_status === 'active' && <span className="low-stock-badge">Low</span>}
+                </td>
                 <td>₹{product.price}</td>
                 <td>{product.stock}</td>
+                <td>{product.low_stock_threshold}</td>
                 <td>{product.category}</td>
+                <td>{product.seller_name || 'N/A'}</td>
                 <td>{new Date(product.created_at).toLocaleDateString()}</td>
+                <td>{product.alert_status ? product.alert_status.charAt(0).toUpperCase() + product.alert_status.slice(1) : 'None'}</td>
                 <td>
                   <button className="edit-btn" onClick={() => handleEdit(product)} data-tooltip-id="tooltip" data-tooltip-content="Edit this product">Edit</button>
                   <button className="delete-btn" onClick={() => handleDelete(product.id)} data-tooltip-id="tooltip" data-tooltip-content="Delete this product">Delete</button>
+                  {permissions?.inventory?.restock && (
+                    <button className="restock-btn" onClick={() => openRestockModal(product)} data-tooltip-id="tooltip" data-tooltip-content="Restock this product">Restock</button>
+                  )}
+                  {permissions?.inventory?.transactions_view && (
+                    <button className="transactions-btn" onClick={() => openTransactionsModal(product.id)} data-tooltip-id="tooltip" data-tooltip-content="View transactions">Transactions</button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -422,6 +635,19 @@ const ManageProducts = () => {
                 {errors.stock && <span className="error">{errors.stock}</span>}
               </div>
               <div className="form-group">
+                <label>Low Stock Threshold</label>
+                <input
+                  type="number"
+                  name="low_stock_threshold"
+                  value={form.low_stock_threshold}
+                  onChange={handleChange}
+                  className={errors.low_stock_threshold ? 'input-error' : ''}
+                  placeholder="Enter low stock threshold"
+                  min="0"
+                />
+                {errors.low_stock_threshold && <span className="error">{errors.low_stock_threshold}</span>}
+              </div>
+              <div className="form-group">
                 <label>Category</label>
                 <select
                   name="category"
@@ -438,6 +664,19 @@ const ManageProducts = () => {
                   <option value="Sports">Sports</option>
                 </select>
                 {errors.category && <span className="error">{errors.category}</span>}
+              </div>
+              <div className="form-group">
+                <label>Seller</label>
+                <select
+                  name="seller_id"
+                  value={form.seller_id}
+                  onChange={handleChange}
+                >
+                  <option value="">No Seller</option>
+                  {sellers.map(seller => (
+                    <option key={seller.id} value={seller.id}>{seller.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-group">
                 <label>Description</label>
@@ -471,6 +710,66 @@ const ManageProducts = () => {
                 <button type="button" className="cancel-btn" onClick={closeModal}>Cancel</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {restockModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Restock Product</h3>
+            <form onSubmit={handleRestockSubmit}>
+              <div className="form-group">
+                <label>Quantity to Add</label>
+                <input
+                  type="number"
+                  value={restockForm.quantity}
+                  onChange={e => setRestockForm(prev => ({ ...prev, quantity: e.target.value }))}
+                  placeholder="Enter quantity"
+                  min="1"
+                  required
+                />
+              </div>
+              <div className="modal-buttons">
+                <button type="submit" className="save-btn">Restock</button>
+                <button type="button" className="cancel-btn" onClick={closeRestockModal}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {transactionsModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Inventory Transactions</h3>
+            {transactions.length === 0 ? (
+              <p>No transactions found.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Quantity</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map(t => (
+                    <tr key={t.id}>
+                      <td>{t.id}</td>
+                      <td>{t.transaction_type}</td>
+                      <td>{t.quantity}</td>
+                      <td>{new Date(t.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="modal-buttons">
+              <button className="cancel-btn" onClick={closeTransactionsModal}>Close</button>
+            </div>
           </div>
         </div>
       )}

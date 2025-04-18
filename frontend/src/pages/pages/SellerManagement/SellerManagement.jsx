@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { AuthContext } from '../../context/AuthContext';
 import './SellerManagement.css';
 
 const SELLERS_PER_PAGE = 10;
 
 const SellerManagement = () => {
+  const { permissions } = useContext(AuthContext);
   const [sellers, setSellers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -20,6 +22,11 @@ const SellerManagement = () => {
   const token = localStorage.getItem('token');
 
   useEffect(() => {
+    if (!permissions?.sellers?.view) {
+      setError('You do not have permission to view sellers');
+      setLoading(false);
+      return;
+    }
     fetchSellers();
     const ws = new WebSocket('ws://localhost:5001');
     ws.onmessage = (event) => {
@@ -30,10 +37,20 @@ const SellerManagement = () => {
       } else if (data.type === 'sellerStatusUpdate') {
         setSellers(prev => prev.map(s => s.id === data.id ? { ...s, status: data.status } : s));
         toast.info(`Seller ${data.seller.name} status updated to ${data.status}`);
+      } else if (data.type === 'restock' || data.type === 'lowStock') {
+        setSellerDetailsModal(prev => {
+          if (prev.open && prev.seller) {
+            const updatedProducts = prev.seller.products.map(p => 
+              p.id === data.id ? { ...p, stock: data.stock } : p
+            );
+            return { ...prev, seller: { ...prev.seller, products: updatedProducts } };
+          }
+          return prev;
+        });
       }
     };
     return () => ws.close();
-  }, []);
+  }, [permissions]);
 
   const fetchSellers = async () => {
     setLoading(true);
@@ -53,10 +70,16 @@ const SellerManagement = () => {
 
   const fetchSellerDetails = async (sellerId) => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/sellers/${sellerId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setSellerDetailsModal({ open: true, seller: res.data });
+      const [sellerRes, productsRes] = await Promise.all([
+        axios.get(`http://localhost:5000/api/sellers/${sellerId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        permissions?.inventory?.view ? axios.get('http://localhost:5000/api/products', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { seller_id: sellerId },
+        }) : { data: [] },
+      ]);
+      setSellerDetailsModal({ open: true, seller: { ...sellerRes.data, products: productsRes.data } });
     } catch (err) {
       toast.error('Failed to fetch seller details: ' + (err.response?.data?.message || 'Unknown error'));
     }
@@ -71,7 +94,7 @@ const SellerManagement = () => {
     try {
       const payload = {
         name: newSeller.name,
-        company_name: newSeller.companyName, // Map to backend field name
+        company_name: newSeller.companyName,
         email: newSeller.email,
         phone: newSeller.phone,
       };
@@ -81,7 +104,7 @@ const SellerManagement = () => {
       toast.success('Seller added successfully!');
       setNewSeller({ name: '', companyName: '', email: '', phone: '' });
       setAddSellerModal(false);
-      // Note: WebSocket will update sellers list via 'newSeller' event
+      fetchSellers();
     } catch (err) {
       toast.error('Failed to add seller: ' + (err.response?.data?.message || 'Unknown error'));
     }
@@ -95,6 +118,7 @@ const SellerManagement = () => {
       });
       toast.success(`Seller ${action}ed successfully!`);
       closeConfirmationModal();
+      fetchSellers();
     } catch (err) {
       toast.error(`Failed to ${action} seller: ${err.response?.data?.message || 'Unknown error'}`);
       closeConfirmationModal();
@@ -125,7 +149,7 @@ const SellerManagement = () => {
   const filterSellers = () => {
     return sellers.filter(seller => {
       const matchesSearch = seller.name.toLowerCase().includes(search.toLowerCase()) ||
-                           seller.companyName.toLowerCase().includes(search.toLowerCase()) ||
+                           seller.company_name.toLowerCase().includes(search.toLowerCase()) ||
                            seller.email.toLowerCase().includes(search.toLowerCase());
       const matchesStatus = statusFilter === 'all' ? true : seller.status === statusFilter;
       return matchesSearch && matchesStatus;
@@ -143,9 +167,11 @@ const SellerManagement = () => {
     <div className="seller-management">
       <ToastContainer position="top-right" autoClose={3000} />
       <h2>Manage Sellers</h2>
-      <button className="add-seller-btn" onClick={openAddSellerModal}>
-        Add New Seller
-      </button>
+      {permissions?.sellers?.edit && (
+        <button className="add-seller-btn" onClick={openAddSellerModal}>
+          Add New Seller
+        </button>
+      )}
       <div className="filters">
         <input
           type="text"
@@ -182,7 +208,7 @@ const SellerManagement = () => {
               {paginatedSellers.map(seller => (
                 <tr key={seller.id}>
                   <td>{seller.name}</td>
-                  <td>{seller.companyName}</td>
+                  <td>{seller.company_name}</td>
                   <td>{seller.email}</td>
                   <td>{seller.phone || 'N/A'}</td>
                   <td>
@@ -197,7 +223,7 @@ const SellerManagement = () => {
                     >
                       View Details
                     </button>
-                    {seller.status === 'Pending' && (
+                    {permissions?.sellers?.edit && seller.status === 'Pending' && (
                       <button
                         className="approve-btn"
                         onClick={() => handleAction('approve', seller.id)}
@@ -205,7 +231,7 @@ const SellerManagement = () => {
                         Approve
                       </button>
                     )}
-                    {seller.status === 'Approved' && (
+                    {permissions?.sellers?.edit && seller.status === 'Approved' && (
                       <button
                         className="block-btn"
                         onClick={() => openConfirmationModal('block', seller.id, seller.name)}
@@ -213,7 +239,7 @@ const SellerManagement = () => {
                         Block
                       </button>
                     )}
-                    {seller.status === 'Blocked' && (
+                    {permissions?.sellers?.edit && seller.status === 'Blocked' && (
                       <button
                         className="unblock-btn"
                         onClick={() => openConfirmationModal('unblock', seller.id, seller.name)}
@@ -320,15 +346,47 @@ const SellerManagement = () => {
         <div className="modal-overlay">
           <div className="seller-details-modal">
             <h3>Seller Details</h3>
-            <div className="seller-details-content">
-              <p><strong>ID:</strong> {sellerDetailsModal.seller.id}</p>
+            <div className="seller-info">
               <p><strong>Name:</strong> {sellerDetailsModal.seller.name}</p>
-              <p><strong>Company Name:</strong> {sellerDetailsModal.seller.companyName}</p>
+              <p><strong>Company Name:</strong> {sellerDetailsModal.seller.company_name}</p>
               <p><strong>Email:</strong> {sellerDetailsModal.seller.email}</p>
               <p><strong>Phone:</strong> {sellerDetailsModal.seller.phone || 'N/A'}</p>
               <p><strong>Status:</strong> {sellerDetailsModal.seller.status}</p>
-              <p><strong>Created At:</strong> {new Date(sellerDetailsModal.seller.createdAt).toLocaleString()}</p>
+              <p><strong>Registered At:</strong> {new Date(sellerDetailsModal.seller.created_at).toLocaleString()}</p>
             </div>
+            {permissions?.inventory?.view && sellerDetailsModal.seller.products?.length > 0 ? (
+              <div className="seller-products">
+                <h4>Products</h4>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Stock</th>
+                      <th>Low Stock Threshold</th>
+                      <th>Price</th>
+                      <th>Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sellerDetailsModal.seller.products.map(product => (
+                      <tr key={product.id} className={product.stock <= product.low_stock_threshold ? 'low-stock' : ''}>
+                        <td>{product.id}</td>
+                        <td>{product.name}</td>
+                        <td>{product.stock} {product.stock <= product.low_stock_threshold && <span>(Low)</span>}</td>
+                        <td>{product.low_stock_threshold}</td>
+                        <td>₹{product.price}</td>
+                        <td>{product.category}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : permissions?.inventory?.view ? (
+              <p>No products associated with this seller.</p>
+            ) : (
+              <p>Product details not visible due to insufficient permissions.</p>
+            )}
             <div className="modal-buttons">
               <button className="cancel-btn" onClick={closeSellerDetailsModal}>Close</button>
             </div>

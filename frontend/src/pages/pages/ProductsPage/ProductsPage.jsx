@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import ProductCard from "../../components/ProductCard/ProductCard";
 import "./ProductsPage.css";
 
 const PRODUCTS_PER_PAGE = 16;
@@ -35,6 +36,7 @@ const ProductsPage = () => {
       console.log("Products fetched:", {
         productCount: response.data.products?.length || 0,
         total: response.data.total || 0,
+        sampleProduct: response.data.products[0], // Log sample for debugging
       });
 
       setAllProducts(response.data.products || []);
@@ -195,26 +197,7 @@ const ProductsPage = () => {
           ) : (
             <div className="products-grid">
               {paginatedProducts.map((product) => (
-                <Link to={`/products/${product.id}`} key={product.id} className="product-card">
-                  <img
-                    src={product.image || "/default-product-image.jpg"}
-                    alt={product.name}
-                    className="product-image"
-                  />
-                  <div className="product-info">
-                    <h3 className="product-title">{product.name}</h3>
-                    <p className="product-price">₹{product.price.toLocaleString()}</p>
-                    <div className="product-rating">
-                      <span className="rating-stars">
-                        {product.rating ? `${product.rating.toFixed(1)} ★` : "No rating"}
-                      </span>
-                      <span className="rating-count">({product.reviews || 0})</span>
-                    </div>
-                    <p className={`product-stock ${product.stock > 0 ? "in-stock" : ""}`}>
-                      {product.stock > 0 ? `${product.stock} in stock` : "Out of stock"}
-                    </p>
-                  </div>
-                </Link>
+                <ProductCard key={product.id} product={product} />
               ))}
             </div>
           )}

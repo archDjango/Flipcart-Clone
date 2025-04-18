@@ -1,4 +1,4 @@
-// src/pages/ProductDetailsPage/ProductDetailsPage.jsx (replace the entire file)
+// src/pages/ProductDetailsPage/ProductDetailsPage.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
@@ -60,6 +60,9 @@ const ProductDetailsPage = () => {
             <>
               <h1 className="product-title">{product.name}</h1>
               <p className="product-category">{product.category}</p>
+              {product.seller_name && (
+                <p className="product-seller">Sold by: {product.seller_name}</p>
+              )}
               <div className="product-rating">
                 <span>⭐ {product.rating ? product.rating.toFixed(1) : "No rating yet"}</span>
                 <span className="rating-count">(Based on reviews)</span>
@@ -67,6 +70,9 @@ const ProductDetailsPage = () => {
               <p className="product-price">₹{product.price?.toLocaleString("en-IN") || "N/A"}</p>
               <p className={`stock-status ${product.stock > 0 ? "in-stock" : "out-of-stock"}`}>
                 {product.stock > 0 ? `In Stock (${product.stock} left)` : "Out of Stock"}
+                {product.stock > 0 && product.stock <= product.low_stock_threshold && (
+                  <span className="low-stock-warning"> (Low Stock)</span>
+                )}
               </p>
               <div className="product-description">
                 <h3>Description</h3>

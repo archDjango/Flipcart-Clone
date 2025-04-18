@@ -21,6 +21,9 @@ const ManageRoles = () => {
       admins: { view: false, create: false, edit: false, delete: false },
       analytics: { view: false, create: false, edit: false, delete: false },
       roles: { view: false, create: false, edit: false, delete: false },
+      returns: { view: false, edit: false },
+      sellers: { view: false, edit: false },
+      inventory: { view: false, edit: false, restock: false, transactions_view: false },
     },
   });
   const token = localStorage.getItem('token');
@@ -65,6 +68,9 @@ const ManageRoles = () => {
           admins: { view: false, create: false, edit: false, delete: false },
           analytics: { view: false, create: false, edit: false, delete: false },
           roles: { view: false, create: false, edit: false, delete: false },
+          returns: { view: false, edit: false },
+          sellers: { view: false, edit: false },
+          inventory: { view: false, edit: false, restock: false, transactions_view: false },
         },
       });
     }
@@ -149,7 +155,7 @@ const ManageRoles = () => {
                   {Object.entries(role.permissions).map(([module, perms]) => (
                     <div key={module}>
                       <strong>{module.charAt(0).toUpperCase() + module.slice(1)}:</strong>{' '}
-                      {Object.entries(perms).filter(([_, enabled]) => enabled).map(([action]) => action).join(', ')}
+                      {Object.entries(perms).filter(([_, enabled]) => enabled).map(([action]) => action.replace('_', ' ')).join(', ')}
                     </div>
                   ))}
                 </td>
@@ -184,14 +190,14 @@ const ManageRoles = () => {
               {Object.keys(formData.permissions).map(module => (
                 <div key={module} className="permission-group">
                   <h5>{module.charAt(0).toUpperCase() + module.slice(1)}</h5>
-                  {['view', 'create', 'edit', 'delete'].map(action => (
+                  {(module === 'inventory' ? ['view', 'edit', 'restock', 'transactions_view'] : module === 'returns' || module === 'sellers' ? ['view', 'edit'] : ['view', 'create', 'edit', 'delete']).map(action => (
                     <label key={action}>
                       <input
                         type="checkbox"
                         checked={formData.permissions[module][action]}
                         onChange={() => togglePermission(module, action)}
                       />
-                      {action.charAt(0).toUpperCase() + action.slice(1)}
+                      {action.charAt(0).toUpperCase() + action.replace('_', ' ').slice(1)}
                     </label>
                   ))}
                 </div>

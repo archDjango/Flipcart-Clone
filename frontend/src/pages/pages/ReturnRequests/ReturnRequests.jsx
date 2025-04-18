@@ -7,133 +7,145 @@ import './ReturnRequests.css';
 
 const ReturnRequests = () => {
   const { permissions } = useContext(AuthContext);
-  const [requests, setRequests] = useState([]);
+  const [returnRequests, setReturnRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [confirmationModal, setConfirmationModal] = useState({
+    open: false,
+    action: '',
+    returnId: null,
+    returnReason: '',
+  });
+  const token = localStorage.getItem('token');
 
   useEffect(() => {
     if (!permissions?.returns?.view) {
-      setError('You do not have permission to view return requests.');
+      setError('You do not have permission to view return requests');
       setLoading(false);
       return;
     }
-
-    const fetchRequests = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await axios.get('http://localhost:5000/api/returns', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setRequests(res.data);
-        setError('');
-      } catch (err) {
-        console.error('Error fetching return requests:', err.response?.data || err.message);
-        setError('Failed to load return requests: ' + (err.response?.data?.message || 'Unknown error'));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchRequests();
-
-    const ws = new WebSocket('ws://localhost:5001');
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'returnStatusUpdate') {
-        setRequests(prev => prev.map(req => req.id === data.id ? { ...req, status: data.status } : req));
-        toast.info(`Return request #${data.id} updated to ${data.status}`);
-      }
-    };
-    return () => ws.close();
+    fetchReturnRequests();
   }, [permissions]);
 
-  const handleStatusChange = async (id, action) => {
-    if (!window.confirm(`Are you sure you want to ${action} this return request?`)) return;
-
+  const fetchReturnRequests = async () => {
+    setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const endpoint = action === 'approve' ? `/api/returns/${id}/approve` : `/api/returns/${id}/reject`;
+      const res = await axios.get('http://localhost:5000/api/returns', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setReturnRequests(res.data);
+      setError('');
+    } catch (err) {
+      setError('Failed to fetch return requests: ' + (err.response?.data?.message || 'Unknown error'));
+      toast.error('Failed to fetch return requests');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAction = async (returnId, action) => {
+    try {
+      const endpoint = `/api/returns/${returnId}/${action}`;
       await axios.put(`http://localhost:5000${endpoint}`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const newStatus = action === 'approve' ? 'Approved' : 'Rejected';
-      setRequests(prev => prev.map(req => req.id === id ? { ...req, status: newStatus } : req));
-      toast.success(`Return request #${id} ${newStatus.toLowerCase()} successfully`);
-      setError('');
+      toast.success(`Return request ${action}ed successfully!`);
+      setConfirmationModal({ open: false, action: '', returnId: null, returnReason: '' });
+      fetchReturnRequests();
     } catch (err) {
-      console.error(`Error ${action}ing return request:`, err.response?.data || err.message);
-      setError(`Failed to ${action} return request: ` + (err.response?.data?.message || 'Unknown error'));
-      toast.error(`Failed to ${action} return request`);
+      toast.error(`Failed to ${action} return request: ${err.response?.data?.message || 'Unknown error'}`);
+      setConfirmationModal({ open: false, action: '', returnId: null, returnReason: '' });
     }
   };
 
-  const getStatusClass = (status) => {
-    switch (status) {
-      case 'Approved':
-        return 'status-approved';
-      case 'Rejected':
-        return 'status-rejected';
-      case 'Pending':
-      default:
-        return 'status-pending';
-    }
+  const openConfirmationModal = (action, returnId, returnReason) => {
+    setConfirmationModal({ open: true, action, returnId, returnReason });
   };
 
-  if (loading) return <div className="spinner">Loading...</div>;
-  if (error) return <div className="error">{error}</div>;
+  const closeConfirmationModal = () => {
+    setConfirmationModal({ open: false, action: '', returnId: null, returnReason: '' });
+  };
 
   return (
     <div className="return-requests">
-      <ToastContainer position="top-right" autoClose={5000} />
+      <ToastContainer position="top-right" autoClose={3000} />
       <h2>Manage Return Requests</h2>
-      {requests.length === 0 ? (
+      {error && <p className="error">{error}</p>}
+      {loading ? (
+        <div className="spinner">Loading return requests...</div>
+      ) : returnRequests.length === 0 ? (
         <p>No return requests found.</p>
       ) : (
-        <div className="requests-list">
-          {requests.map((request) => (
-            <div key={request.id} className="request-item">
-              <p><strong>Return ID:</strong> {request.id}</p>
-              <p><strong>Order ID:</strong> {request.orderId}</p>
-              <p><strong>Customer:</strong> {request.customerName}</p>
-              <p><strong>Product:</strong> {request.productName}</p>
-              <p><strong>Reason:</strong> {request.reason}</p>
-              <p><strong>Status:</strong> <span className={getStatusClass(request.status)}>{request.status}</span></p>
-              <div className="request-actions">
-                {request.status === 'Pending' && permissions?.returns?.edit && (
-                  <>
-                    <button
-                      className="approve-btn"
-                      onClick={() => handleStatusChange(request.id, 'approve')}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      className="reject-btn"
-                      onClick={() => handleStatusChange(request.id, 'reject')}
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
-                <button onClick={() => setSelectedRequest(request)}>View Details</button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Return ID</th>
+              <th>Order ID</th>
+              <th>Product</th>
+              <th>Seller</th>
+              <th>Reason</th>
+              <th>Status</th>
+              <th>Requested At</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {returnRequests.map(request => (
+              <tr key={request.id}>
+                <td>{request.id}</td>
+                <td>{request.order_id}</td>
+                <td>{request.product_name}</td>
+                <td>{request.seller_name || 'N/A'}</td>
+                <td>{request.reason}</td>
+                <td>
+                  <span className={`status-badge ${request.status.toLowerCase()}`}>
+                    {request.status}
+                  </span>
+                </td>
+                <td>{new Date(request.created_at).toLocaleString()}</td>
+                <td>
+                  {permissions?.returns?.edit && request.status === 'Pending' && (
+                    <>
+                      <button
+                        className="approve-btn"
+                        onClick={() => openConfirmationModal('approve', request.id, request.reason)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="reject-btn"
+                        onClick={() => openConfirmationModal('reject', request.id, request.reason)}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
 
-      {selectedRequest && (
-        <div className="modal">
-          <div className="modal-content">
-            <h3>Return Request #{selectedRequest.id}</h3>
-            <p><strong>Order ID:</strong> {selectedRequest.orderId}</p>
-            <p><strong>Customer:</strong> {selectedRequest.customerName}</p>
-            <p><strong>Product:</strong> {selectedRequest.productName}</p>
-            <p><strong>Reason:</strong> {selectedRequest.reason}</p>
-            <p><strong>Status:</strong> <span className={getStatusClass(selectedRequest.status)}>{selectedRequest.status}</span></p>
-            <p><strong>Requested At:</strong> {new Date(selectedRequest.createdAt).toLocaleString()}</p>
-            <button onClick={() => setSelectedRequest(null)}>Close</button>
+      {confirmationModal.open && (
+        <div className="modal-overlay">
+          <div className="confirmation-modal">
+            <h3>Confirm Action</h3>
+            <p>
+              Are you sure you want to {confirmationModal.action} this return request? <br />
+              <strong>Reason:</strong> {confirmationModal.returnReason}
+            </p>
+            <div className="modal-buttons">
+              <button
+                className="confirm-btn"
+                onClick={() => handleAction(confirmationModal.returnId, confirmationModal.action)}
+              >
+                Confirm
+              </button>
+              <button className="cancel-btn" onClick={closeConfirmationModal}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -12,7 +12,8 @@ import ManageRoles from '../ManageRoles/ManageRoles';
 import PaymentMethodsAnalytics from '../PaymentMethodsAnalytics/PaymentMethodsAnalytics';
 import OrderHeatmap from '../OrderHeatmap/OrderHeatmap';
 import ReturnRequests from '../ReturnRequests/ReturnRequests';
-import SellerManagement from '../SellerManagement/SellerManagement'; // New import
+import SellerManagement from '../SellerManagement/SellerManagement';
+import InventoryManagement from '../InventoryManagement/InventoryManagement';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './AdminDashboard.css';
@@ -39,6 +40,7 @@ const AdminDashboard = () => {
       return;
     }
     if (permissions === null) return;
+    console.log('Permissions:', permissions, 'Role:', role); // Debug permissions
     fetchData();
   }, [filter, role, permissions, token]);
 
@@ -50,7 +52,7 @@ const AdminDashboard = () => {
       let ordersData = [];
       let productsData = [];
 
-      if (role === 'admin' && permissions?.users?.view) {
+      if (permissions?.users?.view) {
         const usersRes = await axios.get('http://localhost:5000/api/users', {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -85,7 +87,7 @@ const AdminDashboard = () => {
       }
 
       setStats({
-        totalUsers: role === 'admin' && permissions?.users?.view ? usersData.length : 0,
+        totalUsers: permissions?.users?.view ? usersData.length : 0,
         totalOrders: permissions?.orders?.view ? ordersData.length : 0,
         totalRevenue: permissions?.analytics?.view ? ordersData.reduce((sum, order) => sum + Number(order.totalPrice || 0), 0) : 0,
         totalProducts: permissions?.products?.view ? productsData.length : 0,
@@ -130,24 +132,34 @@ const AdminDashboard = () => {
       };
 
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('WebSocket message received:', data);
-        if (data.type === 'newOrder') {
-          toast.success(`New order received: #${data.order.id}`);
-          fetchData();
-        } else if (data.type === 'lowStock') {
-          data.products.forEach(p => toast.warn(`Low stock: ${p.name} (${p.stock} left)`));
-        } else if (data.type === 'orderStatusUpdate') {
-          setOrders(prev => prev.map(o => o.id === data.id ? { ...o, status: data.status } : o));
-          toast.info(`Order #${data.id} status updated to ${data.status}`);
-        } else if (data.type === 'newReturn') {
-          toast.success(`New return request received: #${data.return.id}`);
-        } else if (data.type === 'returnStatusUpdate') {
-          toast.info(`Return request #${data.id} updated to ${data.status}`);
-        } else if (data.type === 'newSeller') {
-          toast.success(`New seller added: ${data.seller.name}`);
-        } else if (data.type === 'sellerStatusUpdate') {
-          toast.info(`Seller ${data.seller.name} status updated to ${data.status}`);
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket message received:', data);
+          if (data.type === 'newOrder') {
+            toast.success(`New order received: #${data.order.id}`);
+            fetchData();
+          } else if (data.type === 'lowStock') {
+            data.products.forEach(p => toast.warn(`Low stock: ${p.name} (${p.stock} left)`));
+          } else if (data.type === 'restock') {
+            toast.info(`Product ${data.product.name} restocked to ${data.product.stock}`);
+            setProducts(prev => prev.map(p => p.id === data.product.id ? { ...p, stock: data.product.stock, alert_status: data.product.stock > p.low_stock_threshold ? null : p.alert_status } : p));
+          } else if (data.type === 'lowStockAcknowledged') {
+            toast.success(`Low stock alert for product #${data.product_id} acknowledged`);
+            setProducts(prev => prev.map(p => p.id === data.product_id ? { ...p, alert_status: 'resolved' } : p));
+          } else if (data.type === 'orderStatusUpdate') {
+            setOrders(prev => prev.map(o => o.id === data.id ? { ...o, status: data.status } : o));
+            toast.info(`Order #${data.id} status updated to ${data.status}`);
+          } else if (data.type === 'newReturn') {
+            toast.success(`New return request received: #${data.return.id}`);
+          } else if (data.type === 'returnStatusUpdate') {
+            toast.info(`Return request #${data.id} updated to ${data.status}`);
+          } else if (data.type === 'newSeller') {
+            toast.success(`New seller added: ${data.seller.name}`);
+          } else if (data.type === 'sellerStatusUpdate') {
+            toast.info(`Seller ${data.seller.name} status updated to ${data.status}`);
+          }
+        } catch (err) {
+          console.error('WebSocket message error:', err);
         }
       };
 
@@ -218,70 +230,97 @@ const AdminDashboard = () => {
     return <div className="spinner">Loading permissions...</div>;
   }
 
+  // Check if any tabs are visible
+  const hasVisibleTabs = (
+    permissions?.analytics?.view ||
+    permissions?.users?.view ||
+    permissions?.orders?.view ||
+    permissions?.products?.view ||
+    permissions?.reviews?.view ||
+    permissions?.admins?.view ||
+    permissions?.roles?.view ||
+    permissions?.analytics?.view ||
+    permissions?.returns?.view ||
+    permissions?.sellers?.view ||
+    permissions?.inventory?.view
+  );
+
   return (
     <div className="admin-dashboard">
       <ToastContainer position="top-right" autoClose={5000} />
-      <h1>{role === 'admin' ? 'Admin' : role === 'manager' ? 'Manager' : 'Staff'} Dashboard</h1>
+      <h1>{role.charAt(0).toUpperCase() + role.slice(1)} Dashboard</h1>
       {error && <p className="error">{error}</p>}
       {!wsConnected && !error && <p className="warning">Connecting to real-time updates...</p>}
 
-      <div className="tab-navigation">
-        {permissions?.analytics?.view && (
-          <button className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>
-            Analytics
-          </button>
-        )}
-        {role === 'admin' && permissions?.users?.view && (
-          <button className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>
-            Manage Users
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.orders?.view && (
-          <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>
-            Manage Orders
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.products?.view && (
-          <button className={activeTab === 'products' ? 'active' : ''} onClick={() => setActiveTab('products')}>
-            Manage Products
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.reviews?.view && (
-          <button className={activeTab === 'reviews' ? 'active' : ''} onClick={() => setActiveTab('reviews')}>
-            Manage Reviews
-          </button>
-        )}
-        {role === 'admin' && permissions?.admins?.view && (
-          <button className={activeTab === 'admins' ? 'active' : ''} onClick={() => setActiveTab('admins')}>
-            Manage Admins
-          </button>
-        )}
-        {role === 'admin' && permissions?.roles?.view && (
-          <button className={activeTab === 'roles' ? 'active' : ''} onClick={() => setActiveTab('roles')}>
-            Manage Roles
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.analytics?.view && (
-          <button className={activeTab === 'payment-methods' ? 'active' : ''} onClick={() => setActiveTab('payment-methods')}>
-            Payment Methods
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.analytics?.view && (
-          <button className={activeTab === 'heatmap' ? 'active' : ''} onClick={() => setActiveTab('heatmap')}>
-            Order Heatmap
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.returns?.view && (
-          <button className={activeTab === 'returns' ? 'active' : ''} onClick={() => setActiveTab('returns')}>
-            Returns
-          </button>
-        )}
-        {(role === 'admin' || role === 'manager') && permissions?.sellers?.view && (
-          <button className={activeTab === 'sellers' ? 'active' : ''} onClick={() => setActiveTab('sellers')}>
-            Sellers
-          </button>
-        )}
-      </div>
+      {hasVisibleTabs ? (
+        <div className="tab-navigation">
+          {permissions?.analytics?.view && (
+            <button className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>
+              Analytics
+            </button>
+          )}
+          {permissions?.users?.view && (
+            <button className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>
+              Manage Users
+            </button>
+          )}
+          {permissions?.orders?.view && (
+            <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>
+              Manage Orders
+            </button>
+          )}
+          {permissions?.products?.view && (
+            <button className={activeTab === 'products' ? 'active' : ''} onClick={() => setActiveTab('products')}>
+              Manage Products
+            </button>
+          )}
+          {permissions?.reviews?.view && (
+            <button className={activeTab === 'reviews' ? 'active' : ''} onClick={() => setActiveTab('reviews')}>
+              Manage Reviews
+            </button>
+          )}
+          {permissions?.admins?.view && (
+            <button className={activeTab === 'admins' ? 'active' : ''} onClick={() => setActiveTab('admins')}>
+              Manage Admins
+            </button>
+          )}
+          {permissions?.roles?.view && (
+            <button className={activeTab === 'roles' ? 'active' : ''} onClick={() => setActiveTab('roles')}>
+              Manage Roles
+            </button>
+          )}
+          {permissions?.analytics?.view && (
+            <button className={activeTab === 'payment-methods' ? 'active' : ''} onClick={() => setActiveTab('payment-methods')}>
+              Payment Methods
+            </button>
+          )}
+          {permissions?.analytics?.view && (
+            <button className={activeTab === 'heatmap' ? 'active' : ''} onClick={() => setActiveTab('heatmap')}>
+              Order Heatmap
+            </button>
+          )}
+          {permissions?.returns?.view && (
+            <button className={activeTab === 'returns' ? 'active' : ''} onClick={() => setActiveTab('returns')}>
+              Returns
+            </button>
+          )}
+          {permissions?.sellers?.view && (
+            <button className={activeTab === 'sellers' ? 'active' : ''} onClick={() => setActiveTab('sellers')}>
+              Sellers
+            </button>
+          )}
+          {permissions?.inventory?.view && (
+  <button
+    className={activeTab === 'inventory' ? 'active' : ''}
+    onClick={() => setActiveTab('inventory')}
+  >
+    Inventory
+  </button>
+)}
+        </div>
+      ) : (
+        <p className="error">No permissions available. Please contact an administrator.</p>
+      )}
 
       {loading ? (
         <div className="spinner">Loading...</div>
@@ -299,7 +338,7 @@ const AdminDashboard = () => {
                 </select>
               </div>
               <div className="stats-grid">
-                {role === 'admin' && permissions?.users?.view && (
+                {permissions?.users?.view && (
                   <div className="stat-card"><h3>Total Users</h3><p>{stats.totalUsers}</p></div>
                 )}
                 {permissions?.orders?.view && (
@@ -308,7 +347,7 @@ const AdminDashboard = () => {
                 {permissions?.analytics?.view && (
                   <div className="stat-card"><h3>Total Revenue</h3><p>₹{stats.totalRevenue.toFixed(2)}</p></div>
                 )}
-                {(role === 'admin' || role === 'manager') && permissions?.products?.view && (
+                {permissions?.products?.view && (
                   <div className="stat-card"><h3>Total Products</h3><p>{stats.totalProducts}</p></div>
                 )}
               </div>
@@ -318,7 +357,7 @@ const AdminDashboard = () => {
                     <Bar data={orderChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Order Status Distribution' } } }} />
                   </div>
                 )}
-                {(role === 'admin' || role === 'manager') && permissions?.analytics?.view && (
+                {permissions?.analytics?.view && (
                   <>
                     <div className="chart">
                       <Pie data={categoryChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Sales by Category' } } }} />
@@ -329,7 +368,7 @@ const AdminDashboard = () => {
                   </>
                 )}
               </div>
-              {(role === 'admin' || role === 'manager') && permissions?.analytics?.view && (
+              {permissions?.analytics?.view && (
                 <div className="product-performance">
                   <div className="performance-section">
                     <h3>Top-Selling Products</h3>
@@ -344,16 +383,17 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeTab === 'users' && role === 'admin' && permissions?.users?.view && <ManageUsers />}
-          {activeTab === 'orders' && (role === 'admin' || role === 'manager') && permissions?.orders?.view && <ManageOrders />}
-          {activeTab === 'products' && (role === 'admin' || role === 'manager') && permissions?.products?.view && <ManageProducts />}
-          {activeTab === 'reviews' && (role === 'admin' || role === 'manager') && permissions?.reviews?.view && <ManageReviews />}
-          {activeTab === 'admins' && role === 'admin' && permissions?.admins?.view && <ManageAdmins />}
-          {activeTab === 'roles' && role === 'admin' && permissions?.roles?.view && <ManageRoles />}
-          {activeTab === 'payment-methods' && (role === 'admin' || role === 'manager') && permissions?.analytics?.view && <PaymentMethodsAnalytics />}
-          {activeTab === 'heatmap' && (role === 'admin' || role === 'manager') && permissions?.analytics?.view && <OrderHeatmap />}
-          {activeTab === 'returns' && (role === 'admin' || role === 'manager') && permissions?.returns?.view && <ReturnRequests />}
-          {activeTab === 'sellers' && (role === 'admin' || role === 'manager') && permissions?.sellers?.view && <SellerManagement />}
+          {activeTab === 'users' && permissions?.users?.view && <ManageUsers />}
+          {activeTab === 'orders' && permissions?.orders?.view && <ManageOrders />}
+          {activeTab === 'products' && permissions?.products?.view && <ManageProducts />}
+          {activeTab === 'reviews' && permissions?.reviews?.view && <ManageReviews />}
+          {activeTab === 'admins' && permissions?.admins?.view && <ManageAdmins />}
+          {activeTab === 'roles' && permissions?.roles?.view && <ManageRoles />}
+          {activeTab === 'payment-methods' && permissions?.analytics?.view && <PaymentMethodsAnalytics />}
+          {activeTab === 'heatmap' && permissions?.analytics?.view && <OrderHeatmap />}
+          {activeTab === 'returns' && permissions?.returns?.view && <ReturnRequests />}
+          {activeTab === 'sellers' && permissions?.sellers?.view && <SellerManagement />}
+          {activeTab === 'inventory' && permissions?.inventory?.view && <InventoryManagement />}
         </>
       )}
     </div>
