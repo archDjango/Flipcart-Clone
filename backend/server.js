@@ -346,10 +346,38 @@ app.post('/api/orders', auth(['user']), async (req, res) => {
         'INSERT INTO order_items (order_id, product_name, price, quantity) VALUES (?, ?, ?, ?)',
         [orderId, item.name, item.price, item.quantity]
       );
+      const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE name = ?', [item.name]);
+      if (product.length === 0) throw new Error(`Product ${item.name} not found`);
+      if (product[0].stock < item.quantity) throw new Error(`Insufficient stock for ${item.name}`);
+
       await db.execute(
         'UPDATE products SET stock = stock - ? WHERE name = ?',
         [item.quantity, item.name]
       );
+
+      await db.execute(
+        'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+        [product[0].id, item.quantity, 'sale', req.user.id]
+      );
+
+      if (product[0].stock - item.quantity <= product[0].low_stock_threshold) {
+        const [existingAlerts] = await db.execute(
+          'SELECT id FROM low_stock_alerts WHERE product_id = ? AND status = ?',
+          [product[0].id, 'active']
+        );
+        if (existingAlerts.length === 0) {
+          await db.execute(
+            'INSERT INTO low_stock_alerts (product_id, threshold, status, created_at) VALUES (?, ?, ?, NOW())',
+            [product[0].id, product[0].low_stock_threshold, 'active']
+          );
+          const [lowStockProduct] = await db.execute(
+            `SELECT p.id, p.name, p.stock, p.low_stock_threshold
+             FROM products p WHERE p.id = ?`,
+            [product[0].id]
+          );
+          broadcast({ type: 'lowStock', product: lowStockProduct[0] });
+        }
+      }
     }
     const [orders] = await db.execute(
       'SELECT id, user_id, total_price, status, created_at FROM orders WHERE id = ?',
@@ -358,37 +386,66 @@ app.post('/api/orders', auth(['user']), async (req, res) => {
     const newOrder = orders[0];
     broadcast({ type: 'newOrder', order: newOrder });
 
-    const [products] = await db.execute('SELECT id, name, stock FROM products');
-    const lowStockProducts = products.filter(p => p.stock < 10);
-    if (lowStockProducts.length > 0) {
-      broadcast({ type: 'lowStock', products: lowStockProducts });
-    }
-
     res.status(201).json(newOrder);
   } catch (err) {
     console.error('Error saving order:', err.message, err.stack);
-    res.status(500).json({ message: 'Failed to save order' });
+    res.status(500).json({ message: 'Failed to save order: ' + err.message });
   }
 });
 
-// Get All Products (Admin and Manager)
 app.get('/api/products', auth(['admin', 'manager']), checkPermission('products', 'view'), async (req, res) => {
+  const { low_stock } = req.query;
   try {
-    const [rows] = await db.execute(
-      'SELECT id, name, price, stock, category, created_at, rating, image, description FROM products'
-    );
-    const lowStockProducts = rows.filter(p => p.stock < 10);
-    if (lowStockProducts.length > 0) {
-      broadcast({ type: 'lowStock', products: lowStockProducts });
+    let query = `
+      SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
+             p.low_stock_threshold, p.seller_id, s.company_name AS seller_name,
+             lsa.id AS alert_id, lsa.status AS alert_status
+      FROM products p
+      LEFT JOIN sellers s ON p.seller_id = s.id
+      LEFT JOIN low_stock_alerts lsa ON p.id = lsa.product_id
+    `;
+    const params = [];
+
+    if (low_stock === 'true') {
+      query += ' WHERE lsa.status = ?';
+      params.push('active');
     }
-    res.json(rows);
+
+    const [rows] = await db.execute(query, params);
+    const lowStockProducts = rows.filter(p => p.stock <= p.low_stock_threshold && (!p.alert_id || p.alert_status === 'active'));
+    if (lowStockProducts.length > 0) {
+      for (const product of lowStockProducts) {
+        const [existingAlerts] = await db.execute(
+          'SELECT id FROM low_stock_alerts WHERE product_id = ? AND status = ?',
+          [product.id, 'active']
+        );
+        if (existingAlerts.length === 0) {
+          await db.execute(
+            'INSERT INTO low_stock_alerts (product_id, threshold, status, created_at) VALUES (?, ?, ?, NOW())',
+            [product.id, product.low_stock_threshold, 'active']
+          );
+          broadcast({ type: 'lowStock', product });
+        }
+      }
+    }
+    res.json(rows.map(row => ({
+      ...row,
+      price: Number(row.price),
+      stock: Number(row.stock),
+      rating: Number(row.rating) || 0,
+      low_stock_threshold: Number(row.low_stock_threshold),
+      seller_id: row.seller_id || null,
+      seller_name: row.seller_name || 'N/A',
+      alert_id: row.alert_id || null,
+      alert_status: row.alert_status || null
+    })));
   } catch (err) {
     console.error('Get products error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Get Public Products (No Auth)
+// Updated: Get Public Products (No Auth)
 app.get('/api/public/products', async (req, res) => {
   let limit, offset;
 
@@ -410,8 +467,10 @@ app.get('/api/public/products', async (req, res) => {
     console.log('Fetching products with:', { limit, offset });
 
     const query = `
-      SELECT id, name, price, stock, category, description, image, created_at, rating 
-      FROM products 
+      SELECT p.id, p.name, p.price, p.stock, p.category, p.description, p.image, p.created_at, p.rating,
+             p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
+      FROM products p
+      LEFT JOIN sellers s ON p.seller_id = s.id
       LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
     `;
     const [rows] = await db.query(query);
@@ -425,6 +484,9 @@ app.get('/api/public/products', async (req, res) => {
         stock: Number(row.stock),
         rating: Number(row.rating) || 0,
         image: row.image || '/default-product-image.jpg',
+        low_stock_threshold: Number(row.low_stock_threshold),
+        seller_id: row.seller_id || null,
+        seller_name: row.seller_name || 'N/A'
       })),
       total: Number(countResult[0].total),
     });
@@ -442,7 +504,7 @@ app.get('/api/public/products', async (req, res) => {
   }
 });
 
-// Public endpoint to get a single product by ID
+// Updated: Get Single Product by ID (Public)
 app.get('/api/public/products/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -453,7 +515,11 @@ app.get('/api/public/products/:id', async (req, res) => {
 
   try {
     const [rows] = await db.execute(
-      'SELECT id, name, price, stock, category, description, image, created_at, rating FROM products WHERE id = ?',
+      `SELECT p.id, p.name, p.price, p.stock, p.category, p.description, p.image, p.created_at, p.rating,
+              p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = ?`,
       [productId]
     );
 
@@ -467,6 +533,9 @@ app.get('/api/public/products/:id', async (req, res) => {
       stock: Number(rows[0].stock),
       rating: Number(rows[0].rating) || 0,
       image: rows[0].image || '/default-product-image.jpg',
+      low_stock_threshold: Number(rows[0].low_stock_threshold),
+      seller_id: rows[0].seller_id || null,
+      seller_name: rows[0].seller_name || 'N/A'
     });
   } catch (err) {
     console.error('Get product error:', {
@@ -482,9 +551,9 @@ app.get('/api/public/products/:id', async (req, res) => {
   }
 });
 
-// Add Product (Admin and Manager)
+// Add Product
 app.post('/api/products', auth(['admin', 'manager']), checkPermission('products', 'create'), upload.single('image'), async (req, res) => {
-  const { name, price, stock, category, description } = req.body;
+  const { name, price, stock, category, description, low_stock_threshold, seller_id } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
   if (!name || !price || !stock || !category) {
@@ -492,25 +561,68 @@ app.post('/api/products', auth(['admin', 'manager']), checkPermission('products'
   }
 
   try {
+    if (seller_id) {
+      const [seller] = await db.execute('SELECT id FROM sellers WHERE id = ? AND status = ?', [seller_id, 'Approved']);
+      if (seller.length === 0) {
+        return res.status(400).json({ message: 'Invalid or unapproved seller' });
+      }
+    }
+
     const [result] = await db.execute(
-      'INSERT INTO products (name, price, stock, category, description, image) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, price, stock, category, description || null, image]
+      `INSERT INTO products (name, price, stock, category, description, image, low_stock_threshold, seller_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name,
+        price,
+        stock,
+        category,
+        description || null,
+        image,
+        low_stock_threshold || 10,
+        seller_id || null
+      ]
     );
     const [newProduct] = await db.execute(
-      'SELECT id, name, price, stock, category, created_at, rating, image, description FROM products WHERE id = ?',
+      `SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
+              p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = ?`,
       [result.insertId]
     );
+
+    await db.execute(
+      'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+      [result.insertId, stock, 'initial_stock', req.user.id]
+    );
+
+    if (newProduct[0].stock <= newProduct[0].low_stock_threshold) {
+      await db.execute(
+        'INSERT INTO low_stock_alerts (product_id, threshold, status, created_at) VALUES (?, ?, ?, NOW())',
+        [newProduct[0].id, newProduct[0].low_stock_threshold, 'active']
+      );
+      broadcast({ type: 'lowStock', product: newProduct[0] });
+    }
+
     broadcast(newProduct[0]);
-    res.status(201).json(newProduct[0]);
+    res.status(201).json({
+      ...newProduct[0],
+      price: Number(newProduct[0].price),
+      stock: Number(newProduct[0].stock),
+      rating: Number(newProduct[0].rating) || 0,
+      low_stock_threshold: Number(newProduct[0].low_stock_threshold),
+      seller_id: newProduct[0].seller_id || null,
+      seller_name: newProduct[0].seller_name || 'N/A'
+    });
   } catch (err) {
     console.error('Add product error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Update Product (Admin and Manager)
+// Update Product
 app.put('/api/products/:id', auth(['admin', 'manager']), checkPermission('products', 'edit'), upload.single('image'), async (req, res) => {
-  const { name, price, stock, category, description } = req.body;
+  const { name, price, stock, category, description, low_stock_threshold, seller_id } = req.body;
   const { id } = req.params;
   const image = req.file ? `/Uploads/${req.file.filename}` : req.body.image;
 
@@ -519,28 +631,95 @@ app.put('/api/products/:id', auth(['admin', 'manager']), checkPermission('produc
   }
 
   try {
+    if (seller_id) {
+      const [seller] = await db.execute('SELECT id FROM sellers WHERE id = ? AND status = ?', [seller_id, 'Approved']);
+      if (seller.length === 0) {
+        return res.status(400).json({ message: 'Invalid or unapproved seller' });
+      }
+    }
+
+    const [currentProduct] = await db.execute('SELECT stock FROM products WHERE id = ?', [id]);
+    if (currentProduct.length === 0) return res.status(404).json({ message: 'Product not found' });
+
+    const stockDifference = Number(stock) - Number(currentProduct[0].stock);
+    if (stockDifference !== 0) {
+      await db.execute(
+        'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+        [id, Math.abs(stockDifference), stockDifference > 0 ? 'restock' : 'adjustment', req.user.id]
+      );
+    }
+
     await db.execute(
-      'UPDATE products SET name = ?, price = ?, stock = ?, category = ?, description = ?, image = ? WHERE id = ?',
-      [name, price, stock, category, description || null, image || null, id]
+      `UPDATE products SET
+       name = ?, price = ?, stock = ?, category = ?, description = ?, image = ?,
+       low_stock_threshold = ?, seller_id = ?
+       WHERE id = ?`,
+      [
+        name,
+        price,
+        stock,
+        category,
+        description || null,
+        image || null,
+        low_stock_threshold || 10,
+        seller_id || null,
+        id
+      ]
     );
     const [updatedProduct] = await db.execute(
-      'SELECT id, name, price, stock, category, created_at, rating, image, description FROM products WHERE id = ?',
+      `SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
+              p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = ?`,
       [id]
     );
+
     if (updatedProduct.length === 0) return res.status(404).json({ message: 'Product not found' });
+
+    if (updatedProduct[0].stock <= updatedProduct[0].low_stock_threshold) {
+      const [existingAlerts] = await db.execute(
+        'SELECT id FROM low_stock_alerts WHERE product_id = ? AND status = ?',
+        [id, 'active']
+      );
+      if (existingAlerts.length === 0) {
+        await db.execute(
+          'INSERT INTO low_stock_alerts (product_id, threshold, status, created_at) VALUES (?, ?, ?, NOW())',
+          [id, updatedProduct[0].low_stock_threshold, 'active']
+        );
+        broadcast({ type: 'lowStock', product: updatedProduct[0] });
+      }
+    } else {
+      await db.execute('UPDATE low_stock_alerts SET status = ?, resolved_at = NOW() WHERE product_id = ? AND status = ?', ['resolved', id, 'active']);
+    }
+
     broadcast(updatedProduct[0]);
-    res.json(updatedProduct[0]);
+    res.json({
+      ...updatedProduct[0],
+      price: Number(updatedProduct[0].price),
+      stock: Number(updatedProduct[0].stock),
+      rating: Number(updatedProduct[0].rating) || 0,
+      low_stock_threshold: Number(updatedProduct[0].low_stock_threshold),
+      seller_id: updatedProduct[0].seller_id || null,
+      seller_name: updatedProduct[0].seller_name || 'N/A'
+    });
   } catch (err) {
     console.error('Update product error:', err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Delete Product (Admin and Manager)
+// Delete Product
 app.delete('/api/products/:id', auth(['admin', 'manager']), checkPermission('products', 'delete'), async (req, res) => {
   const { id } = req.params;
   try {
+    const [product] = await db.execute('SELECT id FROM products WHERE id = ?', [id]);
+    if (product.length === 0) return res.status(404).json({ message: 'Product not found' });
+
     await db.execute('DELETE FROM products WHERE id = ?', [id]);
+    await db.execute('DELETE FROM inventory_transactions WHERE product_id = ?', [id]);
+    await db.execute('DELETE FROM low_stock_alerts WHERE product_id = ?', [id]);
+
     broadcast({ id, deleted: true });
     res.json({ message: 'Product deleted' });
   } catch (err) {
@@ -549,7 +728,7 @@ app.delete('/api/products/:id', auth(['admin', 'manager']), checkPermission('pro
   }
 });
 
-// Bulk Delete Products (Admin and Manager)
+// Bulk Delete Products
 app.delete('/api/products/bulk', auth(['admin', 'manager']), checkPermission('products', 'delete'), async (req, res) => {
   const { ids } = req.body;
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
@@ -558,6 +737,9 @@ app.delete('/api/products/bulk', auth(['admin', 'manager']), checkPermission('pr
   try {
     const placeholders = ids.map(() => '?').join(',');
     await db.execute(`DELETE FROM products WHERE id IN (${placeholders})`, ids);
+    await db.execute(`DELETE FROM inventory_transactions WHERE product_id IN (${placeholders})`, ids);
+    await db.execute(`DELETE FROM low_stock_alerts WHERE product_id IN (${placeholders})`, ids);
+
     ids.forEach(id => broadcast({ id, deleted: true }));
     res.json({ message: `${ids.length} products deleted` });
   } catch (err) {
@@ -565,6 +747,156 @@ app.delete('/api/products/bulk', auth(['admin', 'manager']), checkPermission('pr
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// New: Restock Product (Admin and Manager)
+app.post('/api/products/:id/restock', auth(['admin', 'manager']), checkPermission('inventory', 'restock'), async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  if (!quantity || isNaN(quantity) || quantity <= 0) {
+    return res.status(400).json({ message: 'Valid quantity is required' });
+  }
+
+  try {
+    const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE id = ?', [id]);
+    if (product.length === 0) return res.status(404).json({ message: 'Product not found' });
+
+    const newStock = Number(product[0].stock) + Number(quantity);
+    await db.execute('UPDATE products SET stock = ? WHERE id = ?', [newStock, id]);
+
+    await db.execute(
+      'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+      [id, quantity, 'restock', req.user.id]
+    );
+
+    const [updatedProduct] = await db.execute(
+      `SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
+              p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
+       FROM products p
+       LEFT JOIN sellers s ON p.seller_id = s.id
+       WHERE p.id = ?`,
+      [id]
+    );
+
+    if (newStock > updatedProduct[0].low_stock_threshold) {
+      await db.execute('UPDATE low_stock_alerts SET status = ?, resolved_at = NOW() WHERE product_id = ? AND status = ?', ['resolved', id, 'active']);
+    }
+
+    broadcast({ type: 'restock', product: updatedProduct[0] });
+    res.json({
+      ...updatedProduct[0],
+      price: Number(updatedProduct[0].price),
+      stock: Number(updatedProduct[0].stock),
+      rating: Number(updatedProduct[0].rating) || 0,
+      low_stock_threshold: Number(updatedProduct[0].low_stock_threshold),
+      seller_id: updatedProduct[0].seller_id || null,
+      seller_name: updatedProduct[0].seller_name || 'N/A'
+    });
+  } catch (err) {
+    console.error('Restock product error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// New: Get Inventory Transactions (Admin and Manager)
+app.get('/api/inventory/transactions', auth(['admin', 'manager']), checkPermission('inventory', 'transactions_view'), async (req, res) => {
+  const { product_id, start_date, end_date, transaction_type } = req.query;
+  try {
+    let query = `
+      SELECT it.id, it.product_id, p.name AS product_name, it.quantity, it.transaction_type, it.created_at, u.name AS user_name
+      FROM inventory_transactions it
+      JOIN products p ON it.product_id = p.id
+      JOIN users u ON it.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (product_id) {
+      query += ' AND it.product_id = ?';
+      params.push(product_id);
+    }
+    if (start_date) {
+      query += ' AND it.created_at >= ?';
+      params.push(start_date);
+    }
+    if (end_date) {
+      query += ' AND it.created_at <= ?';
+      params.push(end_date);
+    }
+    if (transaction_type) {
+      query += ' AND it.transaction_type = ?';
+      params.push(transaction_type);
+    }
+
+    const [rows] = await db.execute(query, params);
+    res.json(rows.map(row => ({
+      id: row.id,
+      product_id: row.product_id,
+      product_name: row.product_name,
+      quantity: Number(row.quantity),
+      transaction_type: row.transaction_type,
+      created_at: row.created_at,
+      user_name: row.user_name
+    })));
+  } catch (err) {
+    console.error('Get inventory transactions error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// New: Get Low Stock Alerts (Admin and Manager)
+app.get('/api/inventory/low-stock-alerts', auth(['admin', 'manager']), checkPermission('inventory', 'view'), async (req, res) => {
+  const { status } = req.query;
+  try {
+    let query = `
+      SELECT lsa.id, lsa.product_id, p.name AS product_name, p.stock, lsa.threshold, lsa.status, lsa.created_at
+      FROM low_stock_alerts lsa
+      JOIN products p ON lsa.product_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      query += ' AND lsa.status = ?';
+      params.push(status);
+    } else {
+      query += ' AND lsa.status = ?';
+      params.push('active');
+    }
+
+    const [rows] = await db.execute(query, params);
+    res.json(rows.map(row => ({
+      id: row.id,
+      product_id: row.product_id,
+      product_name: row.product_name,
+      stock: Number(row.stock),
+      threshold: Number(row.threshold),
+      status: row.status,
+      created_at: row.created_at,
+      acknowledged: row.status === 'resolved'
+    })));
+  } catch (err) {
+    console.error('Get low stock alerts error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// New: Acknowledge Low Stock Alert (Admin and Manager)
+app.put('/api/inventory/low-stock-alerts/:id/acknowledge', auth(['admin', 'manager']), checkPermission('inventory', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [alert] = await db.execute('SELECT id, product_id FROM low_stock_alerts WHERE id = ?', [id]);
+    if (alert.length === 0) return res.status(404).json({ message: 'Low stock alert not found' });
+
+    await db.execute('UPDATE low_stock_alerts SET status = ?, resolved_at = NOW() WHERE id = ?', ['resolved', id]);
+    broadcast({ type: 'lowStockAcknowledged', alert_id: Number(id), product_id: alert[0].product_id });
+    res.json({ message: 'Low stock alert acknowledged' });
+  } catch (err) {
+    console.error('Acknowledge low stock alert error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 // Generate Product Description with Cohere (Admin and Manager)
 app.post('/api/products/generate-description', auth(['admin', 'manager']), checkPermission('products', 'create'), async (req, res) => {
@@ -1048,6 +1380,12 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
         view: role.sellers_view,
         edit: role.sellers_edit,
       },
+      inventory: {
+        view: role.inventory_view,
+        edit: role.inventory_edit,
+        restock: role.inventory_restock,
+        transactions_view: role.inventory_transactions_view,
+      },
     };
 
     res.json({ role: role.name, permissions });
@@ -1058,6 +1396,10 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
 });
 
 // Get all roles (unchanged, included for consistency)
+
+
+
+// Updated: Get All Roles
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
   try {
     console.log('GET /api/roles called by user:', req.user);
@@ -1071,7 +1413,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
-              sellers_view, sellers_edit
+              sellers_view, sellers_edit,
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -1128,6 +1471,12 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
         sellers: {
           view: row.sellers_view,
           edit: row.sellers_edit,
+        },
+        inventory: {
+          view: row.inventory_view,
+          edit: row.inventory_edit,
+          restock: row.inventory_restock,
+          transactions_view: row.inventory_transactions_view,
         }
       }
     })));
@@ -1137,7 +1486,7 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
   }
 });
 
-
+// Updated: Create Role
 app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), async (req, res) => {
   const { name, description, permissions } = req.body;
   if (!name || !permissions) return res.status(400).json({ message: 'Name and permissions are required' });
@@ -1154,8 +1503,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         analytics_view, analytics_create, analytics_edit, analytics_delete,
         roles_view, roles_create, roles_edit, roles_delete,
         returns_view, returns_edit,
-        sellers_view, sellers_edit
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sellers_view, sellers_edit,
+        inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -1191,6 +1541,10 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.returns.edit || false,
         permissions.sellers.view || false,
         permissions.sellers.edit || false,
+        permissions.inventory.view || false,
+        permissions.inventory.edit || false,
+        permissions.inventory.restock || false,
+        permissions.inventory.transactions_view || false
       ]
     );
     const [newRole] = await db.execute(
@@ -1203,7 +1557,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
-              sellers_view, sellers_edit
+              sellers_view, sellers_edit,
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -1261,6 +1616,12 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         sellers: {
           view: newRole[0].sellers_view,
           edit: newRole[0].sellers_edit,
+        },
+        inventory: {
+          view: newRole[0].inventory_view,
+          edit: newRole[0].inventory_edit,
+          restock: newRole[0].inventory_restock,
+          transactions_view: newRole[0].inventory_transactions_view,
         }
       }
     });
@@ -1270,6 +1631,7 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
   }
 });
 
+// Updated: Update Role
 app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), async (req, res) => {
   const { name, description, permissions } = req.body;
   const { id } = req.params;
@@ -1287,7 +1649,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         analytics_view = ?, analytics_create = ?, analytics_edit = ?, analytics_delete = ?,
         roles_view = ?, roles_create = ?, roles_edit = ?, roles_delete = ?,
         returns_view = ?, returns_edit = ?,
-        sellers_view = ?, sellers_edit = ?
+        sellers_view = ?, sellers_edit = ?,
+        inventory_view = ?, inventory_edit = ?, inventory_restock = ?, inventory_transactions_view = ?
        WHERE id = ?`,
       [
         name,
@@ -1324,6 +1687,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.returns.edit || false,
         permissions.sellers.view || false,
         permissions.sellers.edit || false,
+        permissions.inventory.view || false,
+        permissions.inventory.edit || false,
+        permissions.inventory.restock || false,
+        permissions.inventory.transactions_view || false,
         id
       ]
     );
@@ -1337,7 +1704,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               analytics_view, analytics_create, analytics_edit, analytics_delete,
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
-              sellers_view, sellers_edit
+              sellers_view, sellers_edit,
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1396,6 +1764,12 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         sellers: {
           view: updatedRole[0].sellers_view,
           edit: updatedRole[0].sellers_edit,
+        },
+        inventory: {
+          view: updatedRole[0].inventory_view,
+          edit: updatedRole[0].inventory_edit,
+          restock: updatedRole[0].inventory_restock,
+          transactions_view: updatedRole[0].inventory_transactions_view,
         }
       }
     });
@@ -1663,11 +2037,22 @@ app.put('/api/returns/:id/approve', auth(['admin', 'manager']), checkPermission(
 
     await db.execute('UPDATE returns SET status = ? WHERE id = ?', ['Approved', id]);
 
-    // Optionally, restock the product
-    await db.execute(
-      'UPDATE products SET stock = stock + 1 WHERE name = ?',
-      [existing[0].product_name]
-    );
+    const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE name = ?', [existing[0].product_name]);
+    if (product.length > 0) {
+      await db.execute(
+        'UPDATE products SET stock = stock + 1 WHERE id = ?',
+        [product[0].id]
+      );
+
+      await db.execute(
+        'INSERT INTO inventory_transactions (product_id, quantity, type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
+        [product[0].id, 1, 'return', req.user.id]
+      );
+
+      if (product[0].stock + 1 > product[0].low_stock_threshold) {
+        await db.execute('UPDATE low_stock_alerts SET acknowledged = ? WHERE product_id = ? AND acknowledged = ?', [true, product[0].id, false]);
+      }
+    }
 
     broadcast({ type: 'returnStatusUpdate', id: Number(id), status: 'Approved' });
     res.json({ message: 'Return request approved' });
