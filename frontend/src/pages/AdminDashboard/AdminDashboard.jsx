@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Bar, Pie, Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, LineElement, PointElement } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import { NavLink, Routes, Route } from 'react-router-dom';
 import ManageProducts from '../ManageProducts/ManageProducts';
 import ManageUsers from '../../components/ManageUsers/ManageUsers';
 import ManageOrders from '../../components/ManageOrders/ManageOrders';
@@ -14,6 +15,7 @@ import OrderHeatmap from '../OrderHeatmap/OrderHeatmap';
 import ReturnRequests from '../ReturnRequests/ReturnRequests';
 import SellerManagement from '../SellerManagement/SellerManagement';
 import InventoryManagement from '../InventoryManagement/InventoryManagement';
+import CouponManagement from '../CouponManagement/CouponManagement';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './AdminDashboard.css';
@@ -22,7 +24,6 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend,
 
 const AdminDashboard = () => {
   const { role, permissions, logout } = useContext(AuthContext);
-  const [activeTab, setActiveTab] = useState('analytics');
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
@@ -31,6 +32,8 @@ const AdminDashboard = () => {
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // For mobile toggle
+  const [sidebarRetracted, setSidebarRetracted] = useState(false); // For retract/expand
   const token = localStorage.getItem('token');
 
   useEffect(() => {
@@ -40,7 +43,7 @@ const AdminDashboard = () => {
       return;
     }
     if (permissions === null) return;
-    console.log('Permissions:', permissions, 'Role:', role); // Debug permissions
+    console.log('Permissions:', permissions, 'Role:', role);
     fetchData();
   }, [filter, role, permissions, token]);
 
@@ -157,6 +160,9 @@ const AdminDashboard = () => {
             toast.success(`New seller added: ${data.seller.name}`);
           } else if (data.type === 'sellerStatusUpdate') {
             toast.info(`Seller ${data.seller.name} status updated to ${data.status}`);
+          } else if (data.type === 'couponApplied') {
+            toast.info(`Coupon ${data.coupon_code} applied to order #${data.order_id}`);
+            fetchData();
           }
         } catch (err) {
           console.error('WebSocket message error:', err);
@@ -230,8 +236,7 @@ const AdminDashboard = () => {
     return <div className="spinner">Loading permissions...</div>;
   }
 
-  // Check if any tabs are visible
-  const hasVisibleTabs = (
+  const hasVisibleSections = (
     permissions?.analytics?.view ||
     permissions?.users?.view ||
     permissions?.orders?.view ||
@@ -239,163 +244,182 @@ const AdminDashboard = () => {
     permissions?.reviews?.view ||
     permissions?.admins?.view ||
     permissions?.roles?.view ||
-    permissions?.analytics?.view ||
     permissions?.returns?.view ||
     permissions?.sellers?.view ||
-    permissions?.inventory?.view
+    permissions?.inventory?.view ||
+    permissions?.coupons?.view
   );
+
+  const handleRetractToggle = () => {
+    console.log('Toggling sidebar retraction. Current state:', sidebarRetracted);
+    setSidebarRetracted(!sidebarRetracted);
+  };
 
   return (
     <div className="admin-dashboard">
       <ToastContainer position="top-right" autoClose={5000} />
-      <h1>{role.charAt(0).toUpperCase() + role.slice(1)} Dashboard</h1>
-      {error && <p className="error">{error}</p>}
-      {!wsConnected && !error && <p className="warning">Connecting to real-time updates...</p>}
-
-      {hasVisibleTabs ? (
-        <div className="tab-navigation">
+      <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
+        {sidebarOpen ? '✖' : '☰'}
+      </button>
+      <button className="sidebar-retract" onClick={handleRetractToggle}>
+        {sidebarRetracted ? '→' : '←'}
+      </button>
+      <div className={`sidebar ${sidebarOpen ? 'open' : ''} ${sidebarRetracted ? 'retracted' : ''}`}>
+        <h2>{sidebarRetracted ? 'Admin' : 'Admin Dashboard'}</h2>
+        <nav>
           {permissions?.analytics?.view && (
-            <button className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>
-              Analytics
-            </button>
+            <NavLink to="/admin" end className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '📊' : 'Analytics'}</span>
+            </NavLink>
           )}
           {permissions?.users?.view && (
-            <button className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>
-              Manage Users
-            </button>
+            <NavLink to="/admin/users" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '👥' : 'Manage Users'}</span>
+            </NavLink>
           )}
           {permissions?.orders?.view && (
-            <button className={activeTab === 'orders' ? 'active' : ''} onClick={() => setActiveTab('orders')}>
-              Manage Orders
-            </button>
+            <NavLink to="/admin/orders" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '📦' : 'Manage Orders'}</span>
+            </NavLink>
           )}
           {permissions?.products?.view && (
-            <button className={activeTab === 'products' ? 'active' : ''} onClick={() => setActiveTab('products')}>
-              Manage Products
-            </button>
+            <NavLink to="/admin/manage-products" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🛒' : 'Manage Products'}</span>
+            </NavLink>
           )}
           {permissions?.reviews?.view && (
-            <button className={activeTab === 'reviews' ? 'active' : ''} onClick={() => setActiveTab('reviews')}>
-              Manage Reviews
-            </button>
+            <NavLink to="/admin/manage-reviews" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '⭐' : 'Manage Reviews'}</span>
+            </NavLink>
           )}
           {permissions?.admins?.view && (
-            <button className={activeTab === 'admins' ? 'active' : ''} onClick={() => setActiveTab('admins')}>
-              Manage Admins
-            </button>
+            <NavLink to="/admin/manage-admins" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🛡️' : 'Manage Admins'}</span>
+            </NavLink>
           )}
           {permissions?.roles?.view && (
-            <button className={activeTab === 'roles' ? 'active' : ''} onClick={() => setActiveTab('roles')}>
-              Manage Roles
-            </button>
+            <NavLink to="/admin/manage-roles" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🔐' : 'Manage Roles'}</span>
+            </NavLink>
           )}
           {permissions?.analytics?.view && (
-            <button className={activeTab === 'payment-methods' ? 'active' : ''} onClick={() => setActiveTab('payment-methods')}>
-              Payment Methods
-            </button>
+            <NavLink to="/admin/payment-methods" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '💳' : 'Payment Methods'}</span>
+            </NavLink>
           )}
           {permissions?.analytics?.view && (
-            <button className={activeTab === 'heatmap' ? 'active' : ''} onClick={() => setActiveTab('heatmap')}>
-              Order Heatmap
-            </button>
+            <NavLink to="/admin/order-heatmap" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🌍' : 'Order Heatmap'}</span>
+            </NavLink>
           )}
           {permissions?.returns?.view && (
-            <button className={activeTab === 'returns' ? 'active' : ''} onClick={() => setActiveTab('returns')}>
-              Returns
-            </button>
+            <NavLink to="/admin/returns" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🔄' : 'Returns'}</span>
+            </NavLink>
           )}
           {permissions?.sellers?.view && (
-            <button className={activeTab === 'sellers' ? 'active' : ''} onClick={() => setActiveTab('sellers')}>
-              Sellers
-            </button>
+            <NavLink to="/admin/sellers" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🏪' : 'Sellers'}</span>
+            </NavLink>
           )}
           {permissions?.inventory?.view && (
-  <button
-    className={activeTab === 'inventory' ? 'active' : ''}
-    onClick={() => setActiveTab('inventory')}
-  >
-    Inventory
-  </button>
-)}
-        </div>
-      ) : (
-        <p className="error">No permissions available. Please contact an administrator.</p>
-      )}
-
-      {loading ? (
-        <div className="spinner">Loading...</div>
-      ) : (
-        <>
-          {activeTab === 'analytics' && permissions?.analytics?.view && (
-            <div className="analytics-section">
-              <h2>Analytics</h2>
-              <div className="filter-options">
-                <label>Filter by Time:</label>
-                <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-                  <option value="all">All Time</option>
-                  <option value="7days">Last 7 Days</option>
-                  <option value="30days">Last 30 Days</option>
-                </select>
-              </div>
-              <div className="stats-grid">
-                {permissions?.users?.view && (
-                  <div className="stat-card"><h3>Total Users</h3><p>{stats.totalUsers}</p></div>
-                )}
-                {permissions?.orders?.view && (
-                  <div className="stat-card"><h3>Total Orders</h3><p>{stats.totalOrders}</p></div>
-                )}
-                {permissions?.analytics?.view && (
-                  <div className="stat-card"><h3>Total Revenue</h3><p>₹{stats.totalRevenue.toFixed(2)}</p></div>
-                )}
-                {permissions?.products?.view && (
-                  <div className="stat-card"><h3>Total Products</h3><p>{stats.totalProducts}</p></div>
-                )}
-              </div>
-              <div className="charts-container">
-                {permissions?.orders?.view && (
-                  <div className="chart">
-                    <Bar data={orderChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Order Status Distribution' } } }} />
-                  </div>
-                )}
-                {permissions?.analytics?.view && (
-                  <>
-                    <div className="chart">
-                      <Pie data={categoryChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Sales by Category' } } }} />
-                    </div>
-                    <div className="chart">
-                      <Line data={salesTrendData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Sales Trend (Monthly)' } } }} />
-                    </div>
-                  </>
-                )}
-              </div>
-              {permissions?.analytics?.view && (
-                <div className="product-performance">
-                  <div className="performance-section">
-                    <h3>Top-Selling Products</h3>
-                    <ul>{topSelling.map(([name, sales]) => <li key={name}>{name}: ₹{sales.toFixed(2)}</li>)}</ul>
-                  </div>
-                  <div className="performance-section">
-                    <h3>Least-Performing Products</h3>
-                    <ul>{leastPerforming.map(([name, sales]) => <li key={name}>{name}: ₹{sales.toFixed(2)}</li>)}</ul>
-                  </div>
-                </div>
-              )}
-            </div>
+            <NavLink to="/admin/inventory" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '📋' : 'Inventory'}</span>
+            </NavLink>
           )}
+          {permissions?.coupons?.view && (
+            <NavLink to="/admin/coupons" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🎟️' : 'Manage Coupons'}</span>
+            </NavLink>
+          )}
+        </nav>
+      </div>
+      <div className={`content ${sidebarRetracted ? 'retracted' : ''}`}>
+        <h1>{role.charAt(0).toUpperCase() + role.slice(1)} Dashboard</h1>
+        {error && <p className="error">{error}</p>}
+        {!wsConnected && !error && <p className="warning">Connecting to real-time updates...</p>}
 
-          {activeTab === 'users' && permissions?.users?.view && <ManageUsers />}
-          {activeTab === 'orders' && permissions?.orders?.view && <ManageOrders />}
-          {activeTab === 'products' && permissions?.products?.view && <ManageProducts />}
-          {activeTab === 'reviews' && permissions?.reviews?.view && <ManageReviews />}
-          {activeTab === 'admins' && permissions?.admins?.view && <ManageAdmins />}
-          {activeTab === 'roles' && permissions?.roles?.view && <ManageRoles />}
-          {activeTab === 'payment-methods' && permissions?.analytics?.view && <PaymentMethodsAnalytics />}
-          {activeTab === 'heatmap' && permissions?.analytics?.view && <OrderHeatmap />}
-          {activeTab === 'returns' && permissions?.returns?.view && <ReturnRequests />}
-          {activeTab === 'sellers' && permissions?.sellers?.view && <SellerManagement />}
-          {activeTab === 'inventory' && permissions?.inventory?.view && <InventoryManagement />}
-        </>
-      )}
+        {hasVisibleSections ? (
+          <>
+            {loading ? (
+              <div className="spinner">Loading...</div>
+            ) : (
+              <Routes>
+                <Route path="/" element={
+                  <div className="analytics-section">
+                    <h2>Analytics</h2>
+                    <div className="filter-options">
+                      <label>Filter by Time:</label>
+                      <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+                        <option value="all">All Time</option>
+                        <option value="7days">Last 7 Days</option>
+                        <option value="30days">Last 30 Days</option>
+                      </select>
+                    </div>
+                    <div className="stats-grid">
+                      {permissions?.users?.view && (
+                        <div className="stat-card"><h3>Total Users</h3><p>{stats.totalUsers}</p></div>
+                      )}
+                      {permissions?.orders?.view && (
+                        <div className="stat-card"><h3>Total Orders</h3><p>{stats.totalOrders}</p></div>
+                      )}
+                      {permissions?.analytics?.view && (
+                        <div className="stat-card"><h3>Total Revenue</h3><p>₹{stats.totalRevenue.toFixed(2)}</p></div>
+                      )}
+                      {permissions?.products?.view && (
+                        <div className="stat-card"><h3>Total Products</h3><p>{stats.totalProducts}</p></div>
+                      )}
+                    </div>
+                    <div className="charts-container">
+                      {permissions?.orders?.view && (
+                        <div className="chart">
+                          <Bar data={orderChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Order Status Distribution' } } }} />
+                        </div>
+                      )}
+                      {permissions?.analytics?.view && (
+                        <>
+                          <div className="chart">
+                            <Pie data={categoryChartData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Sales by Category' } } }} />
+                          </div>
+                          <div className="chart">
+                            <Line data={salesTrendData} options={{ ...chartOptions, plugins: { ...chartOptions.plugins, title: { text: 'Sales Trend (Monthly)' } } }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    {permissions?.analytics?.view && (
+                      <div className="product-performance">
+                        <div className="performance-section">
+                          <h3>Top-Selling Products</h3>
+                          <ul>{topSelling.map(([name, sales]) => <li key={name}>{name}: ₹{sales.toFixed(2)}</li>)}</ul>
+                        </div>
+                        <div className="performance-section">
+                          <h3>Least-Performing Products</h3>
+                          <ul>{leastPerforming.map(([name, sales]) => <li key={name}>{name}: ₹{sales.toFixed(2)}</li>)}</ul>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                } />
+                <Route path="/users/*" element={<ManageUsers />} />
+                <Route path="/orders/*" element={<ManageOrders />} />
+                <Route path="/manage-products/*" element={<ManageProducts />} />
+                <Route path="/manage-reviews/*" element={<ManageReviews />} />
+                <Route path="/manage-admins/*" element={<ManageAdmins />} />
+                <Route path="/manage-roles/*" element={<ManageRoles />} />
+                <Route path="/payment-methods/*" element={<PaymentMethodsAnalytics />} />
+                <Route path="/order-heatmap/*" element={<OrderHeatmap />} />
+                <Route path="/returns/*" element={<ReturnRequests />} />
+                <Route path="/sellers/*" element={<SellerManagement />} />
+                <Route path="/inventory/*" element={<InventoryManagement />} />
+                <Route path="/coupons/*" element={<CouponManagement />} />
+              </Routes>
+            )}
+          </>
+        ) : (
+          <p className="error">No permissions available. Please contact an administrator.</p>
+        )}
+      </div>
     </div>
   );
 };

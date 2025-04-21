@@ -28,10 +28,18 @@ const OrderHistory = () => {
             <div key={order.id} className="order-card">
               <h3>Order #{order.id}</h3>
               <p>
-                <strong>Date:</strong> {new Date(order.date).toLocaleString()}
+                <strong>Date:</strong> {new Date(order.created_at || order.date).toLocaleString()}
               </p>
               <p>
-                <strong>Total:</strong> ₹{order.totalPrice}
+                <strong>Subtotal:</strong> ₹{order.total + (order.discount || 0)}
+              </p>
+              {order.discount > 0 && (
+                <p>
+                  <strong>Discount ({order.coupon_code || 'Coupon'}):</strong> -₹{order.discount}
+                </p>
+              )}
+              <p>
+                <strong>Total:</strong> ₹{order.total}
               </p>
               <p>
                 <strong>Status:</strong> {order.status}
