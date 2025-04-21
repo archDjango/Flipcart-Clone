@@ -271,24 +271,117 @@ app.get('/api/orders', auth(['admin', 'manager']), checkPermission('orders', 'vi
 });
 
 // Update Order Status (Admin and Manager)
-app.put('/api/orders/:id', auth(['admin', 'manager']), checkPermission('orders', 'edit'), async (req, res) => {
-  const { status } = req.body;
-  if (!['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].includes(status)) {
-    return res.status(400).json({ message: 'Invalid status value' });
+// Create a new order (User only)
+app.post('/api/orders', auth(['user']), async (req, res) => {
+  const { items, total_Price, shippingAddress, payment_method, coupon_code } = req.body;
+  if (!items || !shippingAddress || !payment_method) {
+    return res.status(400).json({ message: 'Items, shipping address, and payment method are required' });
   }
   try {
-    await db.execute('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
-    const [rows] = await db.execute('SELECT id, user_id, total_price, status, created_at FROM orders WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ message: 'Order not found' });
-    const updatedOrder = rows[0];
-    broadcast({ type: 'orderStatusUpdate', id: updatedOrder.id, status: updatedOrder.status });
-    res.json(updatedOrder);
+    let order_total = 0;
+    const itemDetails = [];
+
+    // Calculate total and validate items
+    for (const item of items) {
+      const [products] = await db.execute(
+        `SELECT id, price, stock FROM products WHERE id = ?`,
+        [item.productId]
+      );
+      if (products.length === 0) {
+        return res.status(404).json({ message: `Product ID ${item.productId} not found` });
+      }
+      const product = products[0];
+      if (product.stock < item.quantity) {
+        return res.status(400).json({ message: `Insufficient stock for product ID ${item.productId}` });
+      }
+      const subtotal = product.price * item.quantity;
+      order_total += subtotal;
+      itemDetails.push({ product_id: item.productId, quantity: item.quantity, price: product.price, subtotal });
+    }
+
+    // Apply coupon if provided
+    let discount = 0;
+    let coupon_id = null;
+    if (coupon_code) {
+      const [coupons] = await db.execute(
+        `SELECT id, discount_type, discount_value, min_order_amount
+         FROM coupons
+         WHERE code = ? AND status = 'active' AND expiry_date > NOW()`,
+        [coupon_code]
+      );
+      if (coupons.length === 0) {
+        return res.status(400).json({ message: 'Invalid or expired coupon' });
+      }
+      const coupon = coupons[0];
+      if (order_total < coupon.min_order_amount) {
+        return res.status(400).json({
+          message: `Order total must be at least ${coupon.min_order_amount}`
+        });
+      }
+      if (coupon.discount_type === 'flat') {
+        discount = coupon.discount_value;
+      } else if (coupon.discount_type === 'percentage') {
+        discount = (coupon.discount_value / 100) * order_total;
+      }
+      coupon_id = coupon.id;
+    }
+
+    const final_total = Number(order_total) - Number(discount);
+
+    // Validate frontend-provided totalPrice
+    if (total_Price == null || Math.abs(total_Price - final_total) > 0.01) {
+      return res.status(400).json({ message: 'Provided totalPrice does not match calculated total' });
+    }
+
+    // Create order
+    const [orderResult] = await db.execute(
+      `INSERT INTO orders (user_id, total_Price, shipping_address, payment_method, coupon_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [req.user.id, final_total, shippingAddress, payment_method, coupon_id]
+    );
+    const order_id = orderResult.insertId;
+
+    // Insert order items
+    for (const item of itemDetails) {
+      await db.execute(
+        `INSERT INTO order_items (order_id, product_id, quantity, price)
+         VALUES (?, ?, ?, ?)`,
+        [order_id, item.product_id, item.quantity, item.price]
+      );
+      // Update product stock
+      await db.execute(
+        `UPDATE products SET stock = stock - ? WHERE id = ?`,
+        [item.quantity, item.product_id]
+      );
+    }
+
+    // Log coupon usage if coupon was applied
+    if (coupon_id) {
+      await db.execute(
+        `INSERT INTO coupon_usage (coupon_id, order_id, user_id)
+         VALUES (?, ?, ?)`,
+        [coupon_id, order_id, req.user.id]
+      );
+    }
+
+    // Broadcast order creation
+    broadcast({ type: 'newOrder', order_id, user_id: req.user.id, final_total });
+
+    res.status(201).json({
+      id: order_id,
+      user_id: req.user.id,
+      total_price: Number(final_total),
+      shippingAddress,
+      payment_method,
+      coupon_id,
+      items: itemDetails,
+      discount: Number(discount)
+    });
   } catch (err) {
-    console.error('Update order error:', err.message, err.stack);
-    res.status(500).json({ message: 'Server error updating order' });
+    console.error('Create order error:', err.message);
+    res.status(500).json({ message: 'Server error creating order', error: err.message });
   }
 });
-
 // Get User Orders (User Only)
 app.get('/api/user/orders', auth(['user']), async (req, res) => {
   try {
@@ -327,69 +420,110 @@ app.get('/api/user/orders', auth(['user']), async (req, res) => {
 });
 
 // Add Order (User Only)
+// Create a new order (User only)
 app.post('/api/orders', auth(['user']), async (req, res) => {
-  const { items, totalPrice, paymentMethod } = req.body;
-  if (!items || !Array.isArray(items) || typeof totalPrice !== 'number' || !paymentMethod) {
-    return res.status(400).json({ message: 'Invalid order data or missing payment method' });
+  const { items, shipping_address, payment_method, coupon_code } = req.body;
+  if (!items || !shipping_address || !payment_method) {
+    return res.status(400).json({ message: 'Items, shipping address, and payment method are required' });
   }
   try {
-    const [orderResult] = await db.execute(
-      'INSERT INTO orders (user_id, total_price, status, payment_method) VALUES (?, ?, "Pending", ?)',
-      [req.user.id, totalPrice, paymentMethod]
-    );
-    const orderId = orderResult.insertId;
+    let order_total = 0;
+    const itemDetails = [];
+
+    // Calculate total and validate items
     for (const item of items) {
-      if (!item.name || !item.price || !item.quantity) {
-        throw new Error('Invalid item data');
+      const [products] = await db.execute(
+        `SELECT id, price, stock FROM products WHERE id = ?`,
+        [item.product_id]
+      );
+      if (products.length === 0) {
+        return res.status(404).json({ message: `Product ID ${item.product_id} not found` });
       }
-      await db.execute(
-        'INSERT INTO order_items (order_id, product_name, price, quantity) VALUES (?, ?, ?, ?)',
-        [orderId, item.name, item.price, item.quantity]
-      );
-      const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE name = ?', [item.name]);
-      if (product.length === 0) throw new Error(`Product ${item.name} not found`);
-      if (product[0].stock < item.quantity) throw new Error(`Insufficient stock for ${item.name}`);
-
-      await db.execute(
-        'UPDATE products SET stock = stock - ? WHERE name = ?',
-        [item.quantity, item.name]
-      );
-
-      await db.execute(
-        'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
-        [product[0].id, item.quantity, 'sale', req.user.id]
-      );
-
-      if (product[0].stock - item.quantity <= product[0].low_stock_threshold) {
-        const [existingAlerts] = await db.execute(
-          'SELECT id FROM low_stock_alerts WHERE product_id = ? AND status = ?',
-          [product[0].id, 'active']
-        );
-        if (existingAlerts.length === 0) {
-          await db.execute(
-            'INSERT INTO low_stock_alerts (product_id, threshold, status, created_at) VALUES (?, ?, ?, NOW())',
-            [product[0].id, product[0].low_stock_threshold, 'active']
-          );
-          const [lowStockProduct] = await db.execute(
-            `SELECT p.id, p.name, p.stock, p.low_stock_threshold
-             FROM products p WHERE p.id = ?`,
-            [product[0].id]
-          );
-          broadcast({ type: 'lowStock', product: lowStockProduct[0] });
-        }
+      const product = products[0];
+      if (product.stock < item.quantity) {
+        return res.status(400).json({ message: `Insufficient stock for product ID ${item.product_id}` });
       }
+      const subtotal = product.price * item.quantity;
+      order_total += subtotal;
+      itemDetails.push({ product_id: item.product_id, quantity: item.quantity, price: product.price, subtotal });
     }
-    const [orders] = await db.execute(
-      'SELECT id, user_id, total_price, status, created_at FROM orders WHERE id = ?',
-      [orderId]
-    );
-    const newOrder = orders[0];
-    broadcast({ type: 'newOrder', order: newOrder });
 
-    res.status(201).json(newOrder);
+    // Apply coupon if provided
+    let discount = 0;
+    let coupon_id = null;
+    if (coupon_code) {
+      const [coupons] = await db.execute(
+        `SELECT id, discount_type, discount_value, min_order_amount
+         FROM coupons
+         WHERE code = ? AND status = 'active' AND expiry_date > NOW()`,
+        [coupon_code]
+      );
+      if (coupons.length === 0) {
+        return res.status(400).json({ message: 'Invalid or expired coupon' });
+      }
+      const coupon = coupons[0];
+      if (order_total < coupon.min_order_amount) {
+        return res.status(400).json({
+          message: `Order total must be at least ${coupon.min_order_amount}`
+        });
+      }
+      if (coupon.discount_type === 'flat') {
+        discount = coupon.discount_value;
+      } else if (coupon.discount_type === 'percentage') {
+        discount = (coupon.discount_value / 100) * order_total;
+      }
+      coupon_id = coupon.id;
+    }
+
+    const final_total = Number(order_total) - Number(discount);
+
+    // Create order
+    const [orderResult] = await db.execute(
+      `INSERT INTO orders (user_id, total, shipping_address, payment_method, coupon_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [req.user.id, final_total, shipping_address, payment_method, coupon_id]
+    );
+    const order_id = orderResult.insertId;
+
+    // Insert order items
+    for (const item of itemDetails) {
+      await db.execute(
+        `INSERT INTO order_items (order_id, product_id, quantity, price)
+         VALUES (?, ?, ?, ?)`,
+        [order_id, item.product_id, item.quantity, item.price]
+      );
+      // Update product stock
+      await db.execute(
+        `UPDATE products SET stock = stock - ? WHERE id = ?`,
+        [item.quantity, item.product_id]
+      );
+    }
+
+    // Log coupon usage if coupon was applied
+    if (coupon_id) {
+      await db.execute(
+        `INSERT INTO coupon_usage (coupon_id, order_id, user_id)
+         VALUES (?, ?, ?)`,
+        [coupon_id, order_id, req.user.id]
+      );
+    }
+
+    // Broadcast order creation
+    broadcast({ type: 'newOrder', order_id, user_id: req.user.id, final_total });
+
+    res.status(201).json({
+      id: order_id,
+      user_id: req.user.id,
+      total: Number(final_total),
+      shipping_address,
+      payment_method,
+      coupon_id,
+      items: itemDetails,
+      discount: Number(discount)
+    });
   } catch (err) {
-    console.error('Error saving order:', err.message, err.stack);
-    res.status(500).json({ message: 'Failed to save order: ' + err.message });
+    console.error('Create order error:', err.message);
+    res.status(500).json({ message: 'Server error creating order' });
   }
 });
 
@@ -1310,19 +1444,17 @@ app.put('/api/sellers/:id/unblock', auth(['admin']), checkPermission('sellers', 
 });
 
 // Role Management Endpoints
+
 // Fetch user roles and permissions
 app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermission('users', 'view'), async (req, res) => {
   const { id } = req.params;
   try {
-    // Fetch role_id from user_roles instead of users
     const [userRoles] = await db.execute('SELECT role_id FROM user_roles WHERE user_id = ?', [id]);
     if (!userRoles.length) {
       return res.status(404).json({ message: 'No roles assigned to user' });
     }
 
     const roleId = userRoles[0].role_id;
-
-    // Fetch role and permissions
     const [roles] = await db.execute('SELECT * FROM roles WHERE id = ?', [roleId]);
     if (!roles.length) {
       return res.status(404).json({ message: 'Role not found for user' });
@@ -1386,6 +1518,12 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
         restock: role.inventory_restock,
         transactions_view: role.inventory_transactions_view,
       },
+      coupons: {
+        view: role.coupons_view,
+        create: role.coupons_create,
+        edit: role.coupons_edit,
+        delete: role.coupons_delete,
+      },
     };
 
     res.json({ role: role.name, permissions });
@@ -1395,11 +1533,7 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
   }
 });
 
-// Get all roles (unchanged, included for consistency)
-
-
-
-// Updated: Get All Roles
+// Get all roles
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
   try {
     console.log('GET /api/roles called by user:', req.user);
@@ -1414,7 +1548,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
               sellers_view, sellers_edit,
-              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
+              coupons_view, coupons_create, coupons_edit, coupons_delete
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -1477,7 +1612,13 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
           edit: row.inventory_edit,
           restock: row.inventory_restock,
           transactions_view: row.inventory_transactions_view,
-        }
+        },
+        coupons: {
+          view: row.coupons_view,
+          create: role.coupons_create,
+          edit: row.coupons_edit,
+          delete: row.coupons_delete,
+        },
       }
     })));
   } catch (err) {
@@ -1486,7 +1627,7 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
   }
 });
 
-// Updated: Create Role
+// Create Role
 app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), async (req, res) => {
   const { name, description, permissions } = req.body;
   if (!name || !permissions) return res.status(400).json({ message: 'Name and permissions are required' });
@@ -1504,8 +1645,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         roles_view, roles_create, roles_edit, roles_delete,
         returns_view, returns_edit,
         sellers_view, sellers_edit,
-        inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
+        coupons_view, coupons_create, coupons_edit, coupons_delete
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -1544,7 +1686,11 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.inventory.view || false,
         permissions.inventory.edit || false,
         permissions.inventory.restock || false,
-        permissions.inventory.transactions_view || false
+        permissions.inventory.transactions_view || false,
+        permissions.coupons.view || false,
+        permissions.coupons.create || false,
+        permissions.coupons.edit || false,
+        permissions.coupons.delete || false
       ]
     );
     const [newRole] = await db.execute(
@@ -1558,7 +1704,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
               sellers_view, sellers_edit,
-              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
+              coupons_view, coupons_create, coupons_edit, coupons_delete
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -1622,7 +1769,13 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
           edit: newRole[0].inventory_edit,
           restock: newRole[0].inventory_restock,
           transactions_view: newRole[0].inventory_transactions_view,
-        }
+        },
+        coupons: {
+          view: newRole[0].coupons_view,
+          create: newRole[0].coupons_create,
+          edit: newRole[0].coupons_edit,
+          delete: newRole[0].coupons_delete,
+        },
       }
     });
   } catch (err) {
@@ -1631,7 +1784,7 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
   }
 });
 
-// Updated: Update Role
+// Update Role
 app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), async (req, res) => {
   const { name, description, permissions } = req.body;
   const { id } = req.params;
@@ -1650,7 +1803,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         roles_view = ?, roles_create = ?, roles_edit = ?, roles_delete = ?,
         returns_view = ?, returns_edit = ?,
         sellers_view = ?, sellers_edit = ?,
-        inventory_view = ?, inventory_edit = ?, inventory_restock = ?, inventory_transactions_view = ?
+        inventory_view = ?, inventory_edit = ?, inventory_restock = ?, inventory_transactions_view = ?,
+        coupons_view = ?, coupons_create = ?, coupons_edit = ?, coupons_delete = ?
        WHERE id = ?`,
       [
         name,
@@ -1691,6 +1845,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.inventory.edit || false,
         permissions.inventory.restock || false,
         permissions.inventory.transactions_view || false,
+        permissions.coupons.view || false,
+        permissions.coupons.create || false,
+        permissions.coupons.edit || false,
+        permissions.coupons.delete || false,
         id
       ]
     );
@@ -1705,7 +1863,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               roles_view, roles_create, roles_edit, roles_delete,
               returns_view, returns_edit,
               sellers_view, sellers_edit,
-              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view
+              inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
+              coupons_view, coupons_create, coupons_edit, coupons_delete
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1770,7 +1929,13 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
           edit: updatedRole[0].inventory_edit,
           restock: updatedRole[0].inventory_restock,
           transactions_view: updatedRole[0].inventory_transactions_view,
-        }
+        },
+        coupons: {
+          view: updatedRole[0].coupons_view,
+          create: updatedRole[0].coupons_create,
+          edit: updatedRole[0].coupons_edit,
+          delete: updatedRole[0].coupons_delete,
+        },
       }
     });
   } catch (err) {
@@ -1778,6 +1943,9 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+
+
 
 app.delete('/api/roles/:id', auth(['admin']), checkPermission('roles', 'delete'), async (req, res) => {
   const { id } = req.params;
@@ -2141,5 +2309,248 @@ app.get('/api/sellers/:id', auth(['admin']), checkPermission('sellers', 'view'),
     res.status(500).json({ message: 'Server error fetching seller details' });
   }
 });
+
+// Get active coupons (Public)
+app.get('/api/public/coupons', async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT id, code, discount_type, discount_value, min_order_amount, expiry_date
+       FROM coupons
+       WHERE status = 'active' AND expiry_date > NOW()`
+    );
+    res.json(rows.map(row => ({
+      id: row.id,
+      code: row.code,
+      discount_type: row.discount_type,
+      discount_value: Number(row.discount_value),
+      min_order_amount: Number(row.min_order_amount),
+      expiry_date: row.expiry_date
+    })));
+  } catch (err) {
+    console.error('Get public coupons error:', err.message);
+    res.status(500).json({ message: 'Server error fetching coupons' });
+  }
+});
+
+// Create a new coupon (Admin only)
+app.post('/api/coupons', auth(['admin']), checkPermission('coupons', 'create'), async (req, res) => {
+  const { code, discount_type, discount_value, min_order_amount, expiry_date, status } = req.body;
+  if (!code || !discount_type || !discount_value || !min_order_amount || !expiry_date) {
+    return res.status(400).json({ message: 'Code, discount type, discount value, minimum order amount, and expiry date are required' });
+  }
+  if (!['flat', 'percentage'].includes(discount_type)) {
+    return res.status(400).json({ message: 'Invalid discount type' });
+  }
+  if (!['active', 'inactive'].includes(status || 'active')) {
+    return res.status(400).json({ message: 'Invalid status' });
+  }
+  try {
+    const [result] = await db.execute(
+      `INSERT INTO coupons (code, discount_type, discount_value, min_order_amount, expiry_date, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [code, discount_type, discount_value, min_order_amount, expiry_date, status || 'active']
+    );
+    const [newCoupon] = await db.execute(
+      `SELECT id, code, discount_type, discount_value, min_order_amount, expiry_date, status, created_at
+       FROM coupons WHERE id = ?`,
+      [result.insertId]
+    );
+    broadcast({ type: 'newCoupon', coupon: newCoupon[0] });
+    res.status(201).json({
+      id: newCoupon[0].id,
+      code: newCoupon[0].code,
+      discount_type: newCoupon[0].discount_type,
+      discount_value: Number(newCoupon[0].discount_value),
+      min_order_amount: Number(newCoupon[0].min_order_amount),
+      expiry_date: newCoupon[0].expiry_date,
+      status: newCoupon[0].status,
+      created_at: newCoupon[0].created_at
+    });
+  } catch (err) {
+    console.error('Create coupon error:', err.message);
+    res.status(400).json({ message: err.code === 'ER_DUP_ENTRY' ? 'Coupon code already exists' : 'Server error' });
+  }
+});
+
+// Get all coupons (Admin only)
+app.get('/api/coupons', auth(['admin']), checkPermission('coupons', 'view'), async (req, res) => {
+  const { status, search } = req.query;
+  try {
+    let query = `SELECT id, code, discount_type, discount_value, min_order_amount, expiry_date, status, created_at
+                 FROM coupons`;
+    const params = [];
+    const conditions = [];
+
+    if (status) {
+      conditions.push('status = ?');
+      params.push(status);
+    }
+    if (search) {
+      conditions.push('code LIKE ?');
+      params.push(`%${search}%`);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    query += ' ORDER BY created_at DESC';
+
+    const [rows] = await db.execute(query, params);
+    res.json(rows.map(row => ({
+      id: row.id,
+      code: row.code,
+      discount_type: row.discount_type,
+      discount_value: Number(row.discount_value),
+      min_order_amount: Number(row.min_order_amount),
+      expiry_date: row.expiry_date,
+      status: row.status,
+      created_at: row.created_at
+    })));
+  } catch (err) {
+    console.error('Get coupons error:', err.message);
+    res.status(500).json({ message: 'Server error fetching coupons' });
+  }
+});
+
+// Update a coupon (Admin only)
+app.put('/api/coupons/:id', auth(['admin']), checkPermission('coupons', 'edit'), async (req, res) => {
+  const { code, discount_type, discount_value, min_order_amount, expiry_date, status } = req.body;
+  const { id } = req.params;
+  if (!code || !discount_type || !discount_value || !min_order_amount || !expiry_date) {
+    return res.status(400).json({ message: 'Code, discount type, discount value, minimum order amount, and expiry date are required' });
+  }
+  if (!['flat', 'percentage'].includes(discount_type)) {
+    return res.status(400).json({ message: 'Invalid discount type' });
+  }
+  if (!['active', 'inactive'].includes(status || 'active')) {
+    return res.status(400).json({ message: 'Invalid status' });
+  }
+  try {
+    const [result] = await db.execute(
+      `UPDATE coupons
+       SET code = ?, discount_type = ?, discount_value = ?, min_order_amount = ?, expiry_date = ?, status = ?
+       WHERE id = ?`,
+      [code, discount_type, discount_value, min_order_amount, expiry_date, status || 'active', id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+    const [updatedCoupon] = await db.execute(
+      `SELECT id, code, discount_type, discount_value, min_order_amount, expiry_date, status, created_at
+       FROM coupons WHERE id = ?`,
+      [id]
+    );
+    broadcast({ type: 'couponUpdated', coupon: updatedCoupon[0] });
+    res.json({
+      id: updatedCoupon[0].id,
+      code: updatedCoupon[0].code,
+      discount_type: updatedCoupon[0].discount_type,
+      discount_value: Number(updatedCoupon[0].discount_value),
+      min_order_amount: Number(updatedCoupon[0].min_order_amount),
+      expiry_date: updatedCoupon[0].expiry_date,
+      status: updatedCoupon[0].status,
+      created_at: updatedCoupon[0].created_at
+    });
+  } catch (err) {
+    console.error('Update coupon error:', err.message);
+    res.status(400).json({ message: err.code === 'ER_DUP_ENTRY' ? 'Coupon code already exists' : 'Server error' });
+  }
+});
+
+// Update coupon status (Admin only)
+app.put('/api/coupons/:id/status', auth(['admin']), checkPermission('coupons', 'edit'), async (req, res) => {
+  const { status } = req.body;
+  const { id } = req.params;
+  if (!['active', 'inactive'].includes(status)) {
+    return res.status(400).json({ message: 'Invalid status' });
+  }
+  try {
+    const [result] = await db.execute(
+      `UPDATE coupons SET status = ? WHERE id = ?`,
+      [status, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+    broadcast({ type: 'couponStatusUpdate', id: Number(id), status });
+    res.json({ message: 'Coupon status updated' });
+  } catch (err) {
+    console.error('Update coupon status error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete a coupon (Admin only)
+app.delete('/api/coupons/:id', auth(['admin']), checkPermission('coupons', 'delete'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [result] = await db.execute(`DELETE FROM coupons WHERE id = ?`, [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Coupon not found' });
+    }
+    await db.execute(`DELETE FROM coupon_usage WHERE coupon_id = ?`, [id]);
+    broadcast({ type: 'couponDeleted', id: Number(id) });
+    res.json({ message: 'Coupon deleted' });
+  } catch (err) {
+    console.error('Delete coupon error:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Apply coupon to an order (User only)
+app.post('/api/coupons/apply', auth(['user']), async (req, res) => {
+  const { code, order_total, order_id } = req.body;
+  if (!code || !order_total || !order_id) {
+    return res.status(400).json({ message: 'Coupon code, order total, and order ID are required' });
+  }
+  try {
+    const [orders] = await db.execute(
+      `SELECT id, user_id FROM orders WHERE id = ? AND user_id = ?`,
+      [order_id, req.user.id]
+    );
+    if (orders.length === 0) {
+      return res.status(404).json({ message: 'Order not found or unauthorized' });
+    }
+    const [coupons] = await db.execute(
+      `SELECT id, discount_type, discount_value, min_order_amount
+       FROM coupons
+       WHERE code = ? AND status = 'active' AND expiry_date > NOW()`,
+      [code]
+    );
+    if (coupons.length === 0) {
+      return res.status(400).json({ message: 'Invalid or expired coupon' });
+    }
+    const coupon = coupons[0];
+    if (order_total < coupon.min_order_amount) {
+      return res.status(400).json({
+        message: `Order total must be at least ${coupon.min_order_amount}`
+      });
+    }
+    let discount = 0;
+    if (coupon.discount_type === 'flat') {
+      discount = coupon.discount_value;
+    } else if (coupon.discount_type === 'percentage') {
+      discount = (coupon.discount_value / 100) * order_total;
+    }
+    await db.execute(
+      `INSERT INTO coupon_usage (coupon_id, order_id, user_id)
+       VALUES (?, ?, ?)`,
+      [coupon.id, order_id, req.user.id]
+    );
+    broadcast({ type: 'couponApplied', coupon_id: coupon.id, order_id });
+    res.json({
+      coupon_id: coupon.id,
+      discount: Number(discount),
+      final_total: Number(order_total) - Number(discount)
+    });
+  } catch (err) {
+    console.error('Apply coupon error:', err.message);
+    res.status(500).json({ message: 'Server error applying coupon' });
+  }
+});
+
+
+
+
 
 app.listen(5000, () => console.log('Server running on port 5000'));
