@@ -16,6 +16,7 @@ import ReturnRequests from '../ReturnRequests/ReturnRequests';
 import SellerManagement from '../SellerManagement/SellerManagement';
 import InventoryManagement from '../InventoryManagement/InventoryManagement';
 import CouponManagement from '../CouponManagement/CouponManagement';
+import CustomerManagement from '../CustomerManagement/CustomerManagement';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './AdminDashboard.css';
@@ -84,7 +85,7 @@ const AdminDashboard = () => {
         const ordersRes = await axios.get(query, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        ordersData = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+        ordersData = Array.isArray(ordersRes.data) ? ordersData = ordersRes.data : [];
         setOrders(ordersData);
         console.log('Orders fetched:', ordersData);
       }
@@ -163,6 +164,8 @@ const AdminDashboard = () => {
           } else if (data.type === 'couponApplied') {
             toast.info(`Coupon ${data.coupon_code} applied to order #${data.order_id}`);
             fetchData();
+          } else if (data.type === 'customerStatusUpdate') {
+            toast.info(`Customer #${data.id} status updated to ${data.status}`);
           }
         } catch (err) {
           console.error('WebSocket message error:', err);
@@ -247,7 +250,8 @@ const AdminDashboard = () => {
     permissions?.returns?.view ||
     permissions?.sellers?.view ||
     permissions?.inventory?.view ||
-    permissions?.coupons?.view
+    permissions?.coupons?.view ||
+    permissions?.customers?.view
   );
 
   const handleRetractToggle = () => {
@@ -332,6 +336,11 @@ const AdminDashboard = () => {
               <span>{sidebarRetracted ? '🎟️' : 'Manage Coupons'}</span>
             </NavLink>
           )}
+          {permissions?.customers?.view && (
+            <NavLink to="/admin/customers" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '👤' : 'Manage Customers'}</span>
+            </NavLink>
+          )}
         </nav>
       </div>
       <div className={`content ${sidebarRetracted ? 'retracted' : ''}`}>
@@ -413,6 +422,7 @@ const AdminDashboard = () => {
                 <Route path="/sellers/*" element={<SellerManagement />} />
                 <Route path="/inventory/*" element={<InventoryManagement />} />
                 <Route path="/coupons/*" element={<CouponManagement />} />
+                <Route path="/customers/*" element={<CustomerManagement />} />
               </Routes>
             )}
           </>

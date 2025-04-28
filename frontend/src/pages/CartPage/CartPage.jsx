@@ -1,4 +1,5 @@
 import React, { useContext } from 'react';
+import axios from 'axios';
 import { CartContext } from '../../context/CartContext';
 import './CartPage.css';
 import { Link, useNavigate } from 'react-router-dom';
@@ -7,6 +8,27 @@ const CartPage = () => {
   const { cartItems, increaseQuantity, decreaseQuantity, removeFromCart, getTotalPrice } =
     useContext(CartContext);
   const navigate = useNavigate();
+
+  const logUserActivity = async (productId, activityType) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/user-activity',
+        { product_id: productId, activity_type: activityType },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.error('Log user activity error:', err);
+    }
+  };
+
+  const handleIncreaseQuantity = (id) => {
+    increaseQuantity(id);
+    const item = cartItems.find((item) => item.id === id);
+    if (item) {
+      logUserActivity(item.id, 'add_to_cart');
+    }
+  };
 
   return (
     <div className="cart-container">
@@ -18,7 +40,7 @@ const CartPage = () => {
           <div className="cart-content">
             {/* Left: Cart Items */}
             <div className="cart-items">
-              {cartItems.map(item => (
+              {cartItems.map((item) => (
                 <div className="cart-item" key={item.id}>
                   <img src={item.image} alt={item.name} className="cart-item-image" />
                   <div className="cart-item-details">
@@ -27,7 +49,7 @@ const CartPage = () => {
                     <div className="cart-quantity-controls">
                       <button onClick={() => decreaseQuantity(item.id)}>-</button>
                       <span>{item.quantity}</span>
-                      <button onClick={() => increaseQuantity(item.id)}>+</button>
+                      <button onClick={() => handleIncreaseQuantity(item.id)}>+</button>
                     </div>
                     <button className="remove-btn" onClick={() => removeFromCart(item.id)}>
                       Remove

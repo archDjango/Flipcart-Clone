@@ -7,7 +7,7 @@ import './CheckoutPage.css';
 
 const CheckoutPage = () => {
   const { cartItems, getTotalPrice, getDiscount, clearCart, selectCoupon, selectedCoupon } = useContext(CartContext);
-  const { coupons } = useContext(AuthContext); // Removed addOrder, using axios directly
+  const { coupons } = useContext(AuthContext);
   const navigate = useNavigate();
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [form, setForm] = useState({
@@ -18,6 +18,19 @@ const CheckoutPage = () => {
   });
   const [error, setError] = useState('');
 
+  const logUserActivity = async (productId, activityType) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5000/user-activity',
+        { product_id: productId, activity_type: activityType },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (err) {
+      console.error('Log user activity error:', err);
+    }
+  };
+
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
@@ -27,7 +40,7 @@ const CheckoutPage = () => {
     if (!couponCode) {
       selectCoupon(null);
     } else {
-      const coupon = coupons.find(c => c.code === couponCode);
+      const coupon = coupons.find((c) => c.code === couponCode);
       selectCoupon(coupon || null);
     }
   };
@@ -41,13 +54,13 @@ const CheckoutPage = () => {
 
     const totalPrice = getTotalPrice();
     const order = {
-      items: cartItems.map(item => ({
-        productId: item.id, // Changed to productId for backend consistency
+      items: cartItems.map((item) => ({
+        productId: item.id,
         quantity: item.quantity,
-        price: item.price, // Added price for backend
+        price: item.price,
       })),
-      totalPrice, // Added totalPrice
-      shippingAddress: form.address, // Changed to shippingAddress for backend
+      totalPrice,
+      shippingAddress: form.address,
       paymentMethod: form.paymentMethod,
       coupon_code: selectedCoupon ? selectedCoupon.code : undefined,
     };
@@ -57,6 +70,10 @@ const CheckoutPage = () => {
       const response = await axios.post('http://localhost:5000/api/orders', order, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      // Log purchase activity for each item
+      for (const item of cartItems) {
+        await logUserActivity(item.id, 'purchase');
+      }
       clearCart();
       setOrderPlaced(true);
     } catch (err) {
@@ -114,7 +131,7 @@ const CheckoutPage = () => {
           <h3>💸 Apply Coupon</h3>
           <select onChange={handleCouponChange} value={selectedCoupon ? selectedCoupon.code : ''}>
             <option value="">No Coupon</option>
-            {coupons.map(coupon => (
+            {coupons.map((coupon) => (
               <option key={coupon.id} value={coupon.code}>
                 {coupon.code} ({coupon.discount_type === 'flat' ? `₹${coupon.discount_value}` : `${coupon.discount_value}%`})
               </option>
@@ -130,7 +147,7 @@ const CheckoutPage = () => {
           {cartItems.length === 0 ? (
             <p>Your cart is empty.</p>
           ) : (
-            cartItems.map(item => (
+            cartItems.map((item) => (
               <div className="summary-item" key={item.id}>
                 <img src={item.image} alt={item.name} />
                 <div>
