@@ -1444,7 +1444,6 @@ app.put('/api/sellers/:id/unblock', auth(['admin']), checkPermission('sellers', 
 });
 
 // Role Management Endpoints
-
 // Fetch user roles and permissions
 app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermission('users', 'view'), async (req, res) => {
   const { id } = req.params;
@@ -1524,6 +1523,10 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
         edit: role.coupons_edit,
         delete: role.coupons_delete,
       },
+      customers: {
+        view: role.customers_view,
+        edit: role.customers_edit,
+      },
     };
 
     res.json({ role: role.name, permissions });
@@ -1532,6 +1535,7 @@ app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermis
     res.status(500).json({ message: 'Server error while fetching roles', error: err.message });
   }
 });
+
 
 // Get all roles
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
@@ -1549,7 +1553,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               returns_view, returns_edit,
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
-              coupons_view, coupons_create, coupons_edit, coupons_delete
+              coupons_view, coupons_create, coupons_edit, coupons_delete,
+              customers_view, customers_edit
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -1615,9 +1620,13 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
         },
         coupons: {
           view: row.coupons_view,
-          create: role.coupons_create,
+          create: row.coupons_create,
           edit: row.coupons_edit,
           delete: row.coupons_delete,
+        },
+        customers: {
+          view: row.customers_view,
+          edit: row.customers_edit,
         },
       }
     })));
@@ -1646,8 +1655,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         returns_view, returns_edit,
         sellers_view, sellers_edit,
         inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
-        coupons_view, coupons_create, coupons_edit, coupons_delete
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        coupons_view, coupons_create, coupons_edit, coupons_delete,
+        customers_view, customers_edit
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -1690,7 +1700,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.coupons.view || false,
         permissions.coupons.create || false,
         permissions.coupons.edit || false,
-        permissions.coupons.delete || false
+        permissions.coupons.delete || false,
+        permissions.customers.view || false,
+        permissions.customers.edit || false
       ]
     );
     const [newRole] = await db.execute(
@@ -1705,7 +1717,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               returns_view, returns_edit,
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
-              coupons_view, coupons_create, coupons_edit, coupons_delete
+              coupons_view, coupons_create, coupons_edit, coupons_delete,
+              customers_view, customers_edit
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -1776,6 +1789,10 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
           edit: newRole[0].coupons_edit,
           delete: newRole[0].coupons_delete,
         },
+        customers: {
+          view: newRole[0].customers_view,
+          edit: newRole[0].customers_edit,
+        },
       }
     });
   } catch (err) {
@@ -1804,7 +1821,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         returns_view = ?, returns_edit = ?,
         sellers_view = ?, sellers_edit = ?,
         inventory_view = ?, inventory_edit = ?, inventory_restock = ?, inventory_transactions_view = ?,
-        coupons_view = ?, coupons_create = ?, coupons_edit = ?, coupons_delete = ?
+        coupons_view = ?, coupons_create = ?, coupons_edit = ?, coupons_delete = ?,
+        customers_view = ?, customers_edit = ?
        WHERE id = ?`,
       [
         name,
@@ -1849,6 +1867,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.coupons.create || false,
         permissions.coupons.edit || false,
         permissions.coupons.delete || false,
+        permissions.customers.view || false,
+        permissions.customers.edit || false,
         id
       ]
     );
@@ -1864,7 +1884,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               returns_view, returns_edit,
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
-              coupons_view, coupons_create, coupons_edit, coupons_delete
+              coupons_view, coupons_create, coupons_edit, coupons_delete,
+              customers_view, customers_edit
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1936,6 +1957,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
           edit: updatedRole[0].coupons_edit,
           delete: updatedRole[0].coupons_delete,
         },
+        customers: {
+          view: updatedRole[0].customers_view,
+          edit: updatedRole[0].customers_edit,
+        },
       }
     });
   } catch (err) {
@@ -1943,7 +1968,6 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
     res.status(500).json({ message: 'Server error' });
   }
 });
-
 
 
 
@@ -2550,7 +2574,229 @@ app.post('/api/coupons/apply', auth(['user']), async (req, res) => {
 });
 
 
+// Get all customers (Admin and Manager)
+app.get('/api/customers', auth(['admin', 'manager']), checkPermission('customers', 'view'), async (req, res) => {
+  try {
+    const { search } = req.query;
+    let query = `SELECT id, name, email, phone, status, created_at FROM customers`;
+    const params = [];
+
+    if (search) {
+      query += ` WHERE name LIKE ? OR email LIKE ?`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+
+    const [rows] = await db.execute(query, params);
+    res.json(rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      phone: row.phone,
+      status: row.status,
+      createdAt: row.created_at
+    })));
+  } catch (err) {
+    console.error('Get customers error:', err.message);
+    res.status(500).json({ message: 'Server error fetching customers' });
+  }
+});
+
+// Update customer status (Admin and Manager)
+app.put('/api/customers/:id/status', auth(['admin', 'manager']), checkPermission('customers', 'edit'), async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!['Active', 'Blocked'].includes(status)) {
+    return res.status(400).json({ message: 'Invalid status' });
+  }
+
+  try {
+    const [existing] = await db.execute('SELECT id FROM customers WHERE id = ?', [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: 'Customer not found' });
+    }
+
+    await db.execute('UPDATE customers SET status = ? WHERE id = ?', [status, id]);
+    const [updated] = await db.execute(
+      'SELECT id, name, email, phone, status, created_at FROM customers WHERE id = ?',
+      [id]
+    );
+
+    broadcast({ type: 'customerStatusUpdate', id: Number(id), status, customer: updated[0] });
+    res.json({
+      id: updated[0].id,
+      name: updated[0].name,
+      email: updated[0].email,
+      phone: updated[0].phone,
+      status: updated[0].status,
+      createdAt: updated[0].created_at
+    });
+  } catch (err) {
+    console.error('Update customer status error:', err.message);
+    res.status(500).json({ message: 'Server error updating customer status' });
+  }
+});
 
 
+// Get Product Recommendations for a User
+app.get('/recommendations/:user_id', auth(['user', 'admin', 'manager']), async (req, res) => {
+  const { user_id } = req.params;
+
+  if (isNaN(user_id) || user_id <= 0) {
+    return res.status(400).json({ message: 'Invalid user ID' });
+  }
+
+  try {
+    // Check if user exists
+    const [users] = await db.execute('SELECT id FROM users WHERE id = ?', [user_id]);
+    if (users.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Fetch recommendations from product_recommendations table
+    const [recommendations] = await db.execute(
+      `SELECT pr.id, pr.recommended_product_id, pr.reason, p.name, p.price, p.category, p.image, p.description
+       FROM product_recommendations pr
+       JOIN products p ON pr.recommended_product_id = p.id
+       WHERE pr.user_id = ?`,
+      [user_id]
+    );
+
+    res.json(recommendations.map(row => ({
+      id: row.id,
+      productId: row.recommended_product_id,
+      name: row.name,
+      price: Number(row.price),
+      category: row.category,
+      image: row.image || '/default-product-image.jpg',
+      description: row.description,
+      reason: row.reason,
+    })));
+  } catch (err) {
+    console.error('Get recommendations error:', err.message);
+    res.status(500).json({ message: 'Server error fetching recommendations' });
+  }
+});
+
+// Log User Activity
+app.post('/user-activity', auth(['user']), async (req, res) => {
+  const { product_id, activity_type } = req.body;
+
+  if (!product_id || !activity_type) {
+    return res.status(400).json({ message: 'Product ID and activity type are required' });
+  }
+
+  if (!['view', 'purchase', 'add_to_cart'].includes(activity_type)) {
+    return res.status(400).json({ message: 'Invalid activity type' });
+  }
+
+  try {
+    // Verify product exists
+    const [products] = await db.execute('SELECT id FROM products WHERE id = ?', [product_id]);
+    if (products.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // Insert user activity
+    const [result] = await db.execute(
+      'INSERT INTO user_activity (user_id, product_id, activity_type) VALUES (?, ?, ?)',
+      [req.user.id, product_id, activity_type]
+    );
+
+    // Broadcast activity for real-time updates
+    broadcast({ type: 'userActivity', user_id: req.user.id, product_id, activity_type });
+
+    res.status(201).json({ message: 'Activity logged', activityId: result.insertId });
+  } catch (err) {
+    console.error('Log user activity error:', err.message);
+    res.status(500).json({ message: 'Server error logging activity' });
+  }
+});
+
+// Get Recommended Products for Homepage
+app.get('/products/recommendations', async (req, res) => {
+  try {
+    // Simple recommendation logic: Top products based on user activity (e.g., most viewed or purchased)
+    const [recommendations] = await db.execute(
+      `SELECT p.id, p.name, p.price, p.category, p.image, p.description, COUNT(ua.id) as activity_count
+       FROM products p
+       LEFT JOIN user_activity ua ON p.id = ua.product_id
+       WHERE ua.activity_type IN ('view', 'purchase', 'add_to_cart')
+       GROUP BY p.id
+       ORDER BY activity_count DESC
+       LIMIT 10`
+    );
+
+    res.json(recommendations.map(row => ({
+      id: row.id,
+      name: row.name,
+      price: Number(row.price),
+      category: row.category,
+      image: row.image || '/default-product-image.jpg',
+      description: row.description,
+    })));
+  } catch (err) {
+    console.error('Get homepage recommendations error:', err.message);
+    res.status(500).json({ message: 'Server error fetching homepage recommendations' });
+  }
+});
+
+// Add this endpoint to server.js
+app.post('/generate-recommendations/:user_id', auth(['user', 'admin', 'manager']), async (req, res) => {
+  const { user_id } = req.params;
+
+  if (isNaN(user_id) || user_id <= 0) {
+    return res.status(400).json({ message: 'Invalid user ID' });
+  }
+
+  try {
+    // Fetch user's most viewed categories
+    const [activities] = await db.execute(
+      `SELECT p.category, COUNT(ua.id) as activity_count
+       FROM user_activity ua
+       JOIN products p ON ua.product_id = p.id
+       WHERE ua.user_id = ? AND ua.activity_type = 'view'
+       GROUP BY p.category
+       ORDER BY activity_count DESC
+       LIMIT 2`,
+      [user_id]
+    );
+
+    if (activities.length === 0) {
+      return res.status(200).json({ message: 'No activities found for recommendations' });
+    }
+
+    // Get products from top categories, excluding already interacted products
+    const topCategories = activities.map(a => a.category);
+    const [products] = await db.execute(
+      `SELECT p.id, p.name, p.price, p.category, p.image, p.description
+       FROM products p
+       WHERE p.category IN (?)
+       AND p.id NOT IN (
+         SELECT product_id FROM user_activity WHERE user_id = ? AND activity_type IN ('view', 'add_to_cart', 'purchase')
+       )
+       LIMIT 10`,
+      [topCategories, user_id]
+    );
+
+    // Clear existing recommendations for the user
+    await db.execute('DELETE FROM product_recommendations WHERE user_id = ?', [user_id]);
+
+    // Insert new recommendations
+    for (const product of products) {
+      await db.execute(
+        'INSERT INTO product_recommendations (user_id, recommended_product_id, reason) VALUES (?, ?, ?)',
+        [user_id, product.id, `Based on your interest in ${product.category} products`]
+      );
+    }
+
+    res.status(200).json({ message: 'Recommendations generated successfully' });
+  } catch (err) {
+    console.error('Generate recommendations error:', err.message);
+    res.status(500).json({ message: 'Server error generating recommendations' });
+  }
+});
 
 app.listen(5000, () => console.log('Server running on port 5000'));
