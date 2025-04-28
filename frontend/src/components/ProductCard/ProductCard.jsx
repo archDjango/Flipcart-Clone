@@ -52,6 +52,12 @@ const ProductCard = ({ product }) => {
         
         <div className="product-info">
           <h3 className="product-name">{product.name}</h3>
+          {product.seller_name && (
+            <p className="product-seller">Sold by: {product.seller_name}</p>
+          )}
+          {product.stock <= product.low_stock_threshold && (
+            <span className="low-stock-badge">Low Stock</span>
+          )}
           <div className="product-meta">
             <div className="product-rating">
               {Array.from({ length: 5 }).map((_, i) => (

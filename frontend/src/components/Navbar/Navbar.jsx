@@ -5,7 +5,7 @@ import { CartContext } from '../../context/CartContext';
 import { WishlistContext } from '../../context/WishlistContext';
 import { SearchContext } from '../../context/SearchContext';
 import { AuthContext } from '../../context/AuthContext';
-import { ThemeContext } from '../../context/ThemeContext'; // New import
+import { ThemeContext } from '../../context/ThemeContext';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -15,7 +15,7 @@ const Navbar = () => {
   const { cartItems } = useContext(CartContext);
   const { wishlistItems = [] } = useContext(WishlistContext);
   const { user, role, logout } = useContext(AuthContext);
-  const { darkMode, setDarkMode } = useContext(ThemeContext); // New
+  const { darkMode, setDarkMode } = useContext(ThemeContext);
   const navigate = useNavigate();
 
   const handleSearchChange = (e) => {
@@ -73,7 +73,10 @@ const Navbar = () => {
                         <Link to="/admin/manage-products" className="dropdown-item">Manage Products</Link>
                       </>
                     ) : (
-                      <Link to="/dashboard" className="dropdown-item">User Dashboard</Link>
+                      <>
+                        <Link to="/dashboard" className="dropdown-item">User Dashboard</Link>
+                        <Link to="/recommendations" className="dropdown-item">Recommendations</Link> {/* New Link */}
+                      </>
                     )}
                     <Link to="/wishlist" className="dropdown-item">Wishlist ({wishlistItems.length})</Link>
                     <Link to="/order-history" className="dropdown-item">Orders</Link>

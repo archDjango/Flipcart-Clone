@@ -88,8 +88,12 @@ const ManageOrders = () => {
             <div key={order.id} className="order-item">
               <h3>Order #{order.id}</h3>
               <p><strong>User:</strong> {order.userEmail}</p>
-              <p><strong>Date:</strong> {new Date(order.createdAt).toLocaleDateString()}</p>
-              <p><strong>Total:</strong> ₹{order.totalPrice}</p>
+              <p><strong>Date:</strong> {new Date(order.created_at).toLocaleDateString()}</p>
+              <p><strong>Subtotal:</strong> ₹{order.total + (order.discount || 0)}</p>
+              {order.discount > 0 && (
+                <p><strong>Discount ({order.coupon_code || 'Coupon'}):</strong> -₹{order.discount}</p>
+              )}
+              <p><strong>Total:</strong> ₹{order.total}</p>
               <p><strong>Status:</strong> {order.status}</p>
               <button onClick={() => setSelectedOrder(order)}>View Details</button>
               <select
@@ -111,8 +115,12 @@ const ManageOrders = () => {
           <div className="modal-content">
             <h3>Order #{selectedOrder.id}</h3>
             <p><strong>User:</strong> {selectedOrder.userEmail}</p>
-            <p><strong>Date:</strong> {new Date(selectedOrder.createdAt).toLocaleString()}</p>
-            <p><strong>Total:</strong> ₹{selectedOrder.totalPrice}</p>
+            <p><strong>Date:</strong> {new Date(selectedOrder.created_at).toLocaleString()}</p>
+            <p><strong>Subtotal:</strong> ₹{selectedOrder.total + (selectedOrder.discount || 0)}</p>
+            {selectedOrder.discount > 0 && (
+              <p><strong>Discount ({selectedOrder.coupon_code || 'Coupon'}):</strong> -₹{selectedOrder.discount}</p>
+            )}
+            <p><strong>Total:</strong> ₹{selectedOrder.total}</p>
             <p><strong>Status:</strong> {selectedOrder.status}</p>
             <h4>Items:</h4>
             <ul>
