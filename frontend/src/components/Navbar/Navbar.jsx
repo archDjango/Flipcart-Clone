@@ -6,17 +6,21 @@ import { WishlistContext } from '../../context/WishlistContext';
 import { SearchContext } from '../../context/SearchContext';
 import { AuthContext } from '../../context/AuthContext';
 import { ThemeContext } from '../../context/ThemeContext';
+import Notifications from '../../components/Notifications/Notifications';
 
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const { setSearchQuery } = useContext(SearchContext);
   const { cartItems } = useContext(CartContext);
   const { wishlistItems = [] } = useContext(WishlistContext);
-  const { user, role, logout } = useContext(AuthContext);
+  const { user, role, logout, notifications } = useContext(AuthContext);
   const { darkMode, setDarkMode } = useContext(ThemeContext);
   const navigate = useNavigate();
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
 
   const handleSearchChange = (e) => {
     const value = e.target.value;
@@ -33,6 +37,9 @@ const Navbar = () => {
     const handleClickOutside = (event) => {
       if (!event.target.closest('.profile-container')) {
         setShowProfileDropdown(false);
+      }
+      if (!event.target.closest('.notifications-container')) {
+        setShowNotifications(false);
       }
     };
     document.addEventListener('click', handleClickOutside);
@@ -59,6 +66,22 @@ const Navbar = () => {
         </form>
 
         <div className={`desktop-nav ${isMenuOpen ? 'mobile-open' : ''}`}>
+          <div className="nav-item notifications-container">
+            {user && (
+              <button
+                className="notifications-btn"
+                onClick={() => setShowNotifications(!showNotifications)}
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span className="notifications-badge">{unreadCount}</span>
+                )}
+              </button>
+            )}
+            {showNotifications && user && (
+              <Notifications onClose={() => setShowNotifications(false)} />
+            )}
+          </div>
           <div className="nav-item profile-container" onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
             <button className="profile-btn">
               {user ? user.name : 'Login'} ▼
@@ -75,7 +98,7 @@ const Navbar = () => {
                     ) : (
                       <>
                         <Link to="/dashboard" className="dropdown-item">User Dashboard</Link>
-                        <Link to="/recommendations" className="dropdown-item">Recommendations</Link> {/* New Link */}
+                        <Link to="/recommendations" className="dropdown-item">Recommendations</Link>
                       </>
                     )}
                     <Link to="/wishlist" className="dropdown-item">Wishlist ({wishlistItems.length})</Link>

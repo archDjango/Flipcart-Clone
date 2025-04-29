@@ -13,6 +13,54 @@ export const AuthProvider = ({ children }) => {
   const [wishlist, setWishlist] = useState([]);
   const [inventoryTransactions, setInventoryTransactions] = useState([]);
   const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [ws, setWs] = useState(null);
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const websocket = new WebSocket('ws://localhost:5001');
+    setWs(websocket);
+
+    websocket.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    websocket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('WebSocket message received:', data);
+    
+      if (data.type === 'newNotification') {
+        // For bulk notifications, check if the current user is affected
+        if (
+          user &&
+          (data.notification.user_id === user.id ||
+            data.notification.target === 'all' ||
+            (data.notification.target === 'role:user' && user.role === 'user') ||
+            (data.notification.target === 'role:admin' && user.role === 'admin'))
+        ) {
+          setNotifications((prev) => [data.notification, ...prev]);
+        }
+      } else if (data.type === 'notificationRead' && user && data.user_id === user.id) {
+        setNotifications((prev) =>
+          prev.map((notif) =>
+            notif.id === data.notification_id ? { ...notif, is_read: true } : notif
+          )
+        );
+      } else if (data.type === 'notificationDeleted' && user && data.user_id === user.id) {
+        setNotifications((prev) => prev.filter((notif) => notif.id !== data.notification_id));
+      }
+    };
+
+    websocket.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => {
+      websocket.close();
+    };
+  }, [user]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -20,16 +68,22 @@ export const AuthProvider = ({ children }) => {
       try {
         const decoded = jwtDecode(token);
         console.log('Decoded token:', decoded);
-        setUser({ name: decoded.name || decoded.email, email: decoded.email });
+        setUser({ id: decoded.id, name: decoded.name || decoded.email, email: decoded.email });
         setRole(decoded.role);
         if (['admin', 'manager', 'staff'].includes(decoded.role)) {
           fetchPermissions(token, decoded.id);
           fetchInventoryTransactions(token);
           fetchLowStockAlerts(token);
+          if (['admin', 'manager'].includes(decoded.role)) {
+            fetchCustomers(token);
+            fetchNotifications(token, decoded.id);
+          }
         } else {
           setPermissions({});
           fetchUserOrders(token);
           fetchUserReturns(token);
+          fetchPublicCoupons();
+          fetchNotifications(token, decoded.id);
         }
       } catch (err) {
         console.error('Invalid token:', err);
@@ -44,7 +98,21 @@ export const AuthProvider = ({ children }) => {
         headers: { Authorization: `Bearer ${token}` },
       });
       console.log('Permissions fetched:', res.data.permissions);
-      setPermissions(res.data.permissions || {});
+      setPermissions(res.data.permissions || {
+        products: { view: false, create: false, edit: false, delete: false },
+        orders: { view: false, create: false, edit: false, delete: false },
+        reviews: { view: false, create: false, edit: false, delete: false },
+        users: { view: false, create: false, edit: false, delete: false },
+        admins: { view: false, create: false, edit: false, delete: false },
+        analytics: { view: false, create: false, edit: false, delete: false },
+        roles: { view: false, create: false, edit: false, delete: false },
+        returns: { view: false, edit: false },
+        sellers: { view: false, edit: false },
+        inventory: { view: false, edit: false, restock: false, transactions_view: false },
+        coupons: { view: false, create: false, edit: false, delete: false },
+        customers: { view: false, edit: false },
+        notifications: { view: false, create: false, edit: false, delete: false },
+      });
     } catch (err) {
       console.error('Error fetching permissions:', {
         message: err.message,
@@ -62,6 +130,9 @@ export const AuthProvider = ({ children }) => {
         returns: { view: false, edit: false },
         sellers: { view: false, edit: false },
         inventory: { view: false, edit: false, restock: false, transactions_view: false },
+        coupons: { view: false, create: false, edit: false, delete: false },
+        customers: { view: false, edit: false },
+        notifications: { view: false, create: false, edit: false, delete: false },
       });
     }
   };
@@ -85,6 +156,18 @@ export const AuthProvider = ({ children }) => {
       setReturns(res.data);
     } catch (err) {
       console.error('Error fetching user returns:', err.message, err.response?.status);
+    }
+  };
+
+  const fetchPublicCoupons = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/public/coupons');
+      setCoupons(res.data);
+      return res.data;
+    } catch (err) {
+      console.error('Error fetching public coupons:', err.message, err.response?.status);
+      setCoupons([]);
+      return [];
     }
   };
 
@@ -124,6 +207,99 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const fetchCustomers = async (token, search = '') => {
+    try {
+      const params = search ? { search } : {};
+      const res = await axios.get('http://localhost:5000/api/customers', {
+        headers: { Authorization: `Bearer ${token}` },
+        params,
+      });
+      setCustomers(res.data);
+      return res.data;
+    } catch (err) {
+      console.error('Error fetching customers:', err.message, err.response?.status);
+      setCustomers([]);
+      return [];
+    }
+  };
+
+// Updated fetchNotifications function
+const fetchNotifications = async (token, userId) => {
+  try {
+    const res = await axios.get(`http://localhost:5000/api/notifications/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setNotifications(res.data);
+    return res.data;
+  } catch (err) {
+    console.error('Error fetching notifications:', err.message, err.response?.status);
+    setNotifications([]);
+    return [];
+  }
+};
+
+  const createNotification = async (notificationData) => {
+    try {
+      const res = await axios.post('http://localhost:5000/api/notifications', notificationData, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setNotifications((prev) => [res.data, ...prev]);
+      return { success: true, notification: res.data };
+    } catch (err) {
+      console.error('Create notification error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to create notification' };
+    }
+  };
+
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      await axios.put(
+        `http://localhost:5000/api/notifications/${notificationId}/read`,
+        {},
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setNotifications((prev) =>
+        prev.map((notif) =>
+          notif.id === notificationId ? { ...notif, is_read: true } : notif
+        )
+      );
+      return { success: true };
+    } catch (err) {
+      console.error('Mark notification as read error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to mark notification as read' };
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    try {
+      await axios.delete(`http://localhost:5000/api/notifications/${notificationId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setNotifications((prev) => prev.filter((notif) => notif.id !== notificationId));
+      return { success: true };
+    } catch (err) {
+      console.error('Delete notification error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to delete notification' };
+    }
+  };
+
+  const updateCustomerStatus = async (customerId, status) => {
+    try {
+      const res = await axios.put(
+        `http://localhost:5000/api/customers/${customerId}/status`,
+        { status },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setCustomers(customers.map((customer) =>
+        customer.id === customerId ? { ...customer, status } : customer
+      ));
+      return { success: true, customer: res.data };
+    } catch (err) {
+      console.error('Update customer status error:', err.response?.data || err.message);
+      return { success: false, message: err.response?.data?.message || 'Failed to update customer status' };
+    }
+  };
+
   const signup = async (userData) => {
     try {
       await axios.post('http://localhost:5000/api/signup', userData);
@@ -138,16 +314,22 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', res.data.token);
       const decoded = jwtDecode(res.data.token);
       console.log('Login decoded token:', decoded);
-      setUser(res.data.user);
+      setUser({ id: decoded.id, name: decoded.name || decoded.email, email: decoded.email });
       setRole(res.data.user.role);
       if (['admin', 'manager', 'staff'].includes(res.data.user.role)) {
         await fetchPermissions(res.data.token, decoded.id);
         await fetchInventoryTransactions(res.data.token);
         await fetchLowStockAlerts(res.data.token);
+        if (['admin', 'manager'].includes(res.data.user.role)) {
+          await fetchCustomers(res.data.token);
+          await fetchNotifications(res.data.token, decoded.id);
+        }
       } else {
         setPermissions({});
-        fetchUserOrders(res.data.token);
-        fetchUserReturns(res.data.token);
+        await fetchUserOrders(res.data.token);
+        await fetchUserReturns(res.data.token);
+        await fetchPublicCoupons();
+        await fetchNotifications(res.data.token, decoded.id);
       }
     } catch (err) {
       throw err.response?.data || { message: 'Login failed' };
@@ -161,11 +343,15 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('token', res.data.token);
       const decoded = jwtDecode(res.data.token);
       console.log('Admin login decoded token:', decoded);
-      setUser(res.data.user);
+      setUser({ id: decoded.id, name: decoded.name || decoded.email, email: decoded.email });
       setRole(res.data.user.role);
       await fetchPermissions(res.data.token, decoded.id);
       await fetchInventoryTransactions(res.data.token);
       await fetchLowStockAlerts(res.data.token);
+      if (['admin', 'manager'].includes(res.data.user.role)) {
+        await fetchCustomers(res.data.token);
+        await fetchNotifications(res.data.token, decoded.id);
+      }
     } catch (err) {
       console.error('Admin login error:', err.response?.data || err.message);
       throw err.response?.data || { message: 'Admin login failed' };
@@ -182,6 +368,12 @@ export const AuthProvider = ({ children }) => {
     setWishlist([]);
     setInventoryTransactions([]);
     setLowStockAlerts([]);
+    setCoupons([]);
+    setCustomers([]);
+    setNotifications([]);
+    if (ws) {
+      ws.close();
+    }
   };
 
   const addOrder = async (orderData) => {
@@ -190,7 +382,7 @@ export const AuthProvider = ({ children }) => {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
       });
       setOrders([...orders, res.data]);
-      return { success: true };
+      return { success: true, order: res.data };
     } catch (err) {
       console.error('Add order error:', err.response?.data || err.message);
       return { success: false, message: err.response?.data?.message || 'Failed to add order' };
@@ -219,7 +411,7 @@ export const AuthProvider = ({ children }) => {
         {},
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      setLowStockAlerts(lowStockAlerts.map(alert =>
+      setLowStockAlerts(lowStockAlerts.map((alert) =>
         alert.id === alertId ? { ...alert, status: 'resolved', acknowledged: true } : alert
       ));
       return { success: true };
@@ -234,7 +426,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const removeFromWishlist = (productId) => {
-    setWishlist(wishlist.filter(item => item.id !== productId));
+    setWishlist(wishlist.filter((item) => item.id !== productId));
   };
 
   const getUsers = async () => {
@@ -265,7 +457,7 @@ export const AuthProvider = ({ children }) => {
         { status },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
       );
-      setOrders(orders.map(order => order.id === orderId ? { ...order, status } : order));
+      setOrders(orders.map((order) => (order.id === orderId ? { ...order, status } : order)));
       return res.data;
     } catch (err) {
       throw err.response?.data || { message: 'Failed to update order' };
@@ -297,6 +489,16 @@ export const AuthProvider = ({ children }) => {
         fetchLowStockAlerts,
         restockProduct,
         acknowledgeLowStockAlert,
+        coupons,
+        fetchPublicCoupons,
+        customers,
+        fetchCustomers,
+        updateCustomerStatus,
+        notifications,
+        fetchNotifications,
+        createNotification,
+        markNotificationAsRead,
+        deleteNotification,
       }}
     >
       {children}

@@ -1,26 +1,175 @@
-.navbar { background: #2874f0; padding: 10px 20px; position: fixed; width: 100%; top: 0; z-index: 1000; }
-.navbar-container { display: flex; align-items: center; justify-content: space-between; max-width: 1200px; margin: 0 auto; }
-.navbar-logo { color: white; text-decoration: none; display: flex; flex-direction: column; }
-.logo-text { font-size: 24px; font-weight: bold; }
-.logo-subtext { font-size: 12px; }
-.search-container { flex-grow: 1; margin: 0 20px; display: flex; }
-.search-input { width: 100%; padding: 10px; border: none; border-radius: 4px 0 0 4px; }
-.search-button { padding: 10px; background: white; border: none; border-radius: 0 4px 4px 0; cursor: pointer; }
-.desktop-nav { display: flex; align-items: center; gap: 20px; }
-.nav-item { color: white; text-decoration: none; }
-.profile-container { position: relative; }
-.profile-btn { background: none; border: none; color: white; cursor: pointer; font-size: 16px; }
-.profile-dropdown { position: absolute; top: 100%; right: 0; background: white; color: #333; border-radius: 4px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); min-width: 150px; }
-.dropdown-item { display: block; padding: 10px; text-decoration: none; color: #333; }
-.dropdown-item:hover { background: #f0f0f0; }
-.logout-btn { width: 100%; text-align: left; background: none; border: none; cursor: pointer; }
-.cart-btn { display: flex; align-items: center; gap: 5px; }
-.cart-count { background: #ff6161; padding: 2px 6px; border-radius: 50%; }
-.mobile-menu-btn { display: none; background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
+.navbar {
+  background: #2874f0;
+  color: #fff;
+  padding: 10px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+.navbar-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.navbar-logo {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: #fff;
+}
+
+.logo-text {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.logo-subtext {
+  font-size: 12px;
+  color: #ffe;
+}
+
+.search-container {
+  flex: 1;
+  max-width: 600px;
+  margin: 0 20px;
+  position: relative;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 40px 10px 15px;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.search-button {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.nav-item {
+  position: relative;
+}
+
+.profile-btn, .cart-btn, .notifications-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.notifications-btn {
+  position: relative;
+}
+
+.notifications-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ff6161;
+  color: #fff;
+  border-radius: 50%;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.cart-btn {
+  text-decoration: none;
+}
+
+.cart-count {
+  background: #ff6161;
+  border-radius: 50%;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  width: 200px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.dropdown-item {
+  display: block;
+  padding: 10px 15px;
+  color: #333;
+  text-decoration: none;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dropdown-item:hover {
+  background: #f0f0f0;
+}
+
+.logout-btn {
+  color: #dc3545;
+}
+
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+}
+
 @media (max-width: 768px) {
-  .desktop-nav { display: none; }
-  .desktop-nav.mobile-open { display: flex; flex-direction: column; position: absolute; top: 100%; left: 0; right: 0; background: #2874f0; padding: 20px; }
-  .mobile-menu-btn { display: block; }
+  .desktop-nav {
+    display: none;
+  }
+
+  .desktop-nav.mobile-open {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    top: 60px;
+    left: 0;
+    right: 0;
+    background: #2874f0;
+    padding: 20px;
+    gap: 10px;
+  }
+
+  .mobile-menu-btn {
+    display: block;
+  }
+
+  .search-container {
+    margin: 0 10px;
+  }
 }
 
 /* Dark Mode */

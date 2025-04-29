@@ -4,6 +4,7 @@ export const CartContext = createContext();
 
 export const CartProvider = ({ children }) => {
   const [cartItems, setCartItems] = useState([]);
+  const [selectedCoupon, setSelectedCoupon] = useState(null); // Store selected coupon
 
   const addToCart = (product) => {
     setCartItems((prev) => {
@@ -36,10 +37,37 @@ export const CartProvider = ({ children }) => {
   };
 
   const getTotalPrice = () => {
-    return cartItems.reduce((total, item) => total + item.price * item.quantity, 0);
+    const subtotal = cartItems.reduce((total, item) => total + item.price * item.quantity, 0);
+    if (!selectedCoupon) return subtotal;
+
+    let discount = 0;
+    if (selectedCoupon.discount_type === 'flat') {
+      discount = selectedCoupon.discount_value;
+    } else if (selectedCoupon.discount_type === 'percentage') {
+      discount = (selectedCoupon.discount_value / 100) * subtotal;
+    }
+    return Math.max(0, subtotal - discount); // Ensure total doesn't go negative
   };
 
-  const clearCart = () => setCartItems([]);
+  const getDiscount = () => {
+    if (!selectedCoupon) return 0;
+    const subtotal = cartItems.reduce((total, item) => total + item.price * item.quantity, 0);
+    if (selectedCoupon.discount_type === 'flat') {
+      return selectedCoupon.discount_value;
+    } else if (selectedCoupon.discount_type === 'percentage') {
+      return (selectedCoupon.discount_value / 100) * subtotal;
+    }
+    return 0;
+  };
+
+  const clearCart = () => {
+    setCartItems([]);
+    setSelectedCoupon(null); // Clear coupon on cart clear
+  };
+
+  const selectCoupon = (coupon) => {
+    setSelectedCoupon(coupon);
+  };
 
   return (
     <CartContext.Provider
@@ -50,7 +78,10 @@ export const CartProvider = ({ children }) => {
         increaseQuantity,
         decreaseQuantity,
         getTotalPrice,
+        getDiscount,
         clearCart,
+        selectedCoupon,
+        selectCoupon,
       }}
     >
       {children}
