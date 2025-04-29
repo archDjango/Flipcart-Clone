@@ -1445,97 +1445,112 @@ app.put('/api/sellers/:id/unblock', auth(['admin']), checkPermission('sellers', 
 
 // Role Management Endpoints
 // Fetch user roles and permissions
-app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermission('users', 'view'), async (req, res) => {
+app.get('/api/users/:id/roles', auth(['admin', 'manager', 'staff']), checkPermission('roles', 'view'), async (req, res) => {
   const { id } = req.params;
   try {
-    const [userRoles] = await db.execute('SELECT role_id FROM user_roles WHERE user_id = ?', [id]);
-    if (!userRoles.length) {
-      return res.status(404).json({ message: 'No roles assigned to user' });
-    }
-
-    const roleId = userRoles[0].role_id;
-    const [roles] = await db.execute('SELECT * FROM roles WHERE id = ?', [roleId]);
-    if (!roles.length) {
-      return res.status(404).json({ message: 'Role not found for user' });
-    }
-
-    const role = roles[0];
-    const permissions = {
-      products: {
-        view: role.products_view,
-        create: role.products_create,
-        edit: role.products_edit,
-        delete: role.products_delete,
-      },
-      orders: {
-        view: role.orders_view,
-        create: role.orders_create,
-        edit: role.orders_edit,
-        delete: role.orders_delete,
-      },
-      reviews: {
-        view: role.reviews_view,
-        create: role.reviews_create,
-        edit: role.reviews_edit,
-        delete: role.reviews_delete,
-      },
-      users: {
-        view: role.users_view,
-        create: role.users_create,
-        edit: role.users_edit,
-        delete: role.users_delete,
-      },
-      admins: {
-        view: role.admins_view,
-        create: role.admins_create,
-        edit: role.admins_edit,
-        delete: role.admins_delete,
-      },
-      analytics: {
-        view: role.analytics_view,
-        create: role.analytics_create,
-        edit: role.analytics_edit,
-        delete: role.analytics_delete,
-      },
-      roles: {
-        view: role.roles_view,
-        create: role.roles_create,
-        edit: role.roles_edit,
-        delete: role.roles_delete,
-      },
-      returns: {
-        view: role.returns_view,
-        edit: role.returns_edit,
-      },
-      sellers: {
-        view: role.sellers_view,
-        edit: role.sellers_edit,
-      },
-      inventory: {
-        view: role.inventory_view,
-        edit: role.inventory_edit,
-        restock: role.inventory_restock,
-        transactions_view: role.inventory_transactions_view,
-      },
-      coupons: {
-        view: role.coupons_view,
-        create: role.coupons_create,
-        edit: role.coupons_edit,
-        delete: role.coupons_delete,
-      },
-      customers: {
-        view: role.customers_view,
-        edit: role.customers_edit,
-      },
-    };
-
-    res.json({ role: role.name, permissions });
+    const [rows] = await db.execute(
+      `SELECT r.id, r.name, r.description,
+              r.products_view, r.products_create, r.products_edit, r.products_delete,
+              r.orders_view, r.orders_create, r.orders_edit, r.orders_delete,
+              r.reviews_view, r.reviews_create, r.reviews_edit, r.reviews_delete,
+              r.users_view, r.users_create, r.users_edit, r.users_delete,
+              r.admins_view, r.admins_create, r.admins_edit, r.admins_delete,
+              r.analytics_view, r.analytics_create, r.analytics_edit, r.analytics_delete,
+              r.roles_view, r.roles_create, r.roles_edit, r.roles_delete,
+              r.returns_view, r.returns_edit,
+              r.sellers_view, r.sellers_edit,
+              r.inventory_view, r.inventory_edit, r.inventory_restock, r.inventory_transactions_view,
+              r.coupons_view, r.coupons_create, r.coupons_edit, r.coupons_delete,
+              r.customers_view, r.customers_edit,
+              r.notifications_view, r.notifications_create, r.notifications_edit, r.notifications_delete
+       FROM user_roles ur
+       JOIN roles r ON ur.role_id = r.id
+       WHERE ur.user_id = ?`,
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'No roles found for this user' });
+    res.json({
+      role: rows[0].name,
+      permissions: {
+        products: {
+          view: rows[0].products_view,
+          create: rows[0].products_create,
+          edit: rows[0].products_edit,
+          delete: rows[0].products_delete,
+        },
+        orders: {
+          view: rows[0].orders_view,
+          create: rows[0].orders_create,
+          edit: rows[0].orders_edit,
+          delete: rows[0].orders_delete,
+        },
+        reviews: {
+          view: rows[0].reviews_view,
+          create: rows[0].reviews_create,
+          edit: rows[0].reviews_edit,
+          delete: rows[0].reviews_delete,
+        },
+        users: {
+          view: rows[0].users_view,
+          create: rows[0].users_create,
+          edit: rows[0].users_edit,
+          delete: rows[0].users_delete,
+        },
+        admins: {
+          view: rows[0].admins_view,
+          create: rows[0].admins_create,
+          edit: rows[0].admins_edit,
+          delete: rows[0].admins_delete,
+        },
+        analytics: {
+          view: rows[0].analytics_view,
+          create: rows[0].analytics_create,
+          edit: rows[0].analytics_edit,
+          delete: rows[0].analytics_delete,
+        },
+        roles: {
+          view: rows[0].roles_view,
+          create: rows[0].roles_create,
+          edit: rows[0].roles_edit,
+          delete: rows[0].roles_delete,
+        },
+        returns: {
+          view: rows[0].returns_view,
+          edit: rows[0].returns_edit,
+        },
+        sellers: {
+          view: rows[0].sellers_view,
+          edit: rows[0].sellers_edit,
+        },
+        inventory: {
+          view: rows[0].inventory_view,
+          edit: rows[0].inventory_edit,
+          restock: rows[0].inventory_restock,
+          transactions_view: rows[0].inventory_transactions_view,
+        },
+        coupons: {
+          view: rows[0].coupons_view,
+          create: rows[0].coupons_create,
+          edit: rows[0].coupons_edit,
+          delete: rows[0].coupons_delete,
+        },
+        customers: {
+          view: rows[0].customers_view,
+          edit: rows[0].customers_edit,
+        },
+        notifications: {
+          view: rows[0].notifications_view,
+          create: rows[0].notifications_create,
+          edit: rows[0].notifications_edit,
+          delete: rows[0].notifications_delete,
+        }
+      }
+    });
   } catch (err) {
-    console.error('Error in /api/users/:id/roles:', err);
+    console.error('Get user roles error:', err.message);
     res.status(500).json({ message: 'Server error while fetching roles', error: err.message });
   }
 });
-
 
 // Get all roles
 app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (req, res) => {
@@ -1554,7 +1569,8 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
               coupons_view, coupons_create, coupons_edit, coupons_delete,
-              customers_view, customers_edit
+              customers_view, customers_edit,
+              notifications_view, notifications_create, notifications_view, notifications_delete,
        FROM roles`
     );
     res.json(rows.map(row => ({
@@ -1628,6 +1644,12 @@ app.get('/api/roles', auth(['admin']), checkPermission('roles', 'view'), async (
           view: row.customers_view,
           edit: row.customers_edit,
         },
+        coupons: {
+          view: row.notifications_view,
+          create: row.notifications_create,
+          edit: row.notifications_edit,
+          delete: row.notifications_delete,
+        },
       }
     })));
   } catch (err) {
@@ -1656,8 +1678,9 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         sellers_view, sellers_edit,
         inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
         coupons_view, coupons_create, coupons_edit, coupons_delete,
-        customers_view, customers_edit
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        customers_view, customers_edit,
+        notifications_view, notifications_create, notifications_edit, notifications_delete
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || null,
@@ -1702,7 +1725,11 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
         permissions.coupons.edit || false,
         permissions.coupons.delete || false,
         permissions.customers.view || false,
-        permissions.customers.edit || false
+        permissions.customers.edit || false,
+        permissions.notifications.view || false,
+        permissions.notifications.create || false,
+        permissions.notifications.edit || false,
+        permissions.notifications.delete || false
       ]
     );
     const [newRole] = await db.execute(
@@ -1718,7 +1745,8 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
               coupons_view, coupons_create, coupons_edit, coupons_delete,
-              customers_view, customers_edit
+              customers_view, customers_edit,
+              notifications_view, notifications_create, notifications_edit, notifications_delete
        FROM roles WHERE id = ?`,
       [result.insertId]
     );
@@ -1793,6 +1821,12 @@ app.post('/api/roles', auth(['admin']), checkPermission('roles', 'create'), asyn
           view: newRole[0].customers_view,
           edit: newRole[0].customers_edit,
         },
+        notifications: {
+          view: newRole[0].notifications_view,
+          create: newRole[0].notifications_create,
+          edit: newRole[0].notifications_edit,
+          delete: newRole[0].notifications_delete,
+        }
       }
     });
   } catch (err) {
@@ -1822,7 +1856,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         sellers_view = ?, sellers_edit = ?,
         inventory_view = ?, inventory_edit = ?, inventory_restock = ?, inventory_transactions_view = ?,
         coupons_view = ?, coupons_create = ?, coupons_edit = ?, coupons_delete = ?,
-        customers_view = ?, customers_edit = ?
+        customers_view = ?, customers_edit = ?,
+        notifications_view = ?, notifications_create = ?, notifications_edit = ?, notifications_delete = ?
        WHERE id = ?`,
       [
         name,
@@ -1869,6 +1904,10 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
         permissions.coupons.delete || false,
         permissions.customers.view || false,
         permissions.customers.edit || false,
+        permissions.notifications.view || false,
+        permissions.notifications.create || false,
+        permissions.notifications.edit || false,
+        permissions.notifications.delete || false,
         id
       ]
     );
@@ -1885,7 +1924,8 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
               sellers_view, sellers_edit,
               inventory_view, inventory_edit, inventory_restock, inventory_transactions_view,
               coupons_view, coupons_create, coupons_edit, coupons_delete,
-              customers_view, customers_edit
+              customers_view, customers_edit,
+              notifications_view, notifications_create, notifications_edit, notifications_delete
        FROM roles WHERE id = ?`,
       [id]
     );
@@ -1961,6 +2001,12 @@ app.put('/api/roles/:id', auth(['admin']), checkPermission('roles', 'edit'), asy
           view: updatedRole[0].customers_view,
           edit: updatedRole[0].customers_edit,
         },
+        notifications: {
+          view: updatedRole[0].notifications_view,
+          create: updatedRole[0].notifications_create,
+          edit: updatedRole[0].notifications_edit,
+          delete: updatedRole[0].notifications_delete,
+        }
       }
     });
   } catch (err) {
@@ -2796,6 +2842,194 @@ app.post('/generate-recommendations/:user_id', auth(['user', 'admin', 'manager']
   } catch (err) {
     console.error('Generate recommendations error:', err.message);
     res.status(500).json({ message: 'Server error generating recommendations' });
+  }
+});
+
+
+// Create Notification (Admin, Manager with create permission)
+app.post(
+  '/api/notifications',
+  auth(['admin', 'manager']),
+  checkPermission('notifications', 'create'),
+  async (req, res) => {
+    const { title, message, target, targetId, priority = 'normal' } = req.body;
+
+    if (!title || !message) {
+      return res.status(400).json({ message: 'Title and message are required' });
+    }
+
+    try {
+      let createdNotifications = [];
+
+      // Helper function to insert notification and broadcast
+      const insertNotification = async (userId) => {
+        const [result] = await db.execute(
+          'INSERT INTO notifications (user_id, title, message, is_read, priority) VALUES (?, ?, ?, ?, ?)',
+          [userId, title, message, false, priority]
+        );
+        const [newNotification] = await db.execute(
+          'SELECT id, user_id, title, message, is_read, priority, created_at FROM notifications WHERE id = ?',
+          [result.insertId]
+        );
+        broadcast({ type: 'newNotification', notification: newNotification[0] });
+        return newNotification[0];
+      };
+
+      // Target: specific user
+      if (target.startsWith('user')) {
+        const userId = target === 'user' ? targetId : target.split(':')[1];
+        if (!userId) {
+          return res.status(400).json({ message: 'User ID is required for user target' });
+        }
+        const [userCheck] = await db.execute('SELECT id FROM users WHERE id = ?', [userId]);
+        if (userCheck.length === 0) {
+          return res.status(404).json({ message: 'User not found' });
+        }
+        const notification = await insertNotification(userId);
+        createdNotifications.push(notification);
+        return res.status(201).json(notification);
+      }
+
+      // Target: all customers
+      if (target === 'role:user') {
+        const [users] = await db.execute('SELECT id FROM users WHERE role = "user"');
+        for (const user of users) {
+          const notification = await insertNotification(user.id);
+          createdNotifications.push(notification);
+        }
+        return res.status(201).json({ message: 'Notifications created for all customers', notifications: createdNotifications });
+      }
+
+      // Target: all admins
+      if (target === 'role:admin') {
+        const [admins] = await db.execute('SELECT id FROM users WHERE role = "admin"');
+        for (const admin of admins) {
+          const notification = await insertNotification(admin.id);
+          createdNotifications.push(notification);
+        }
+        return res.status(201).json({ message: 'Notifications created for all admins', notifications: createdNotifications });
+      }
+
+      // Target: all users (admins + customers)
+      if (target === 'all') {
+        const [allUsers] = await db.execute('SELECT id FROM users');
+        for (const user of allUsers) {
+          const notification = await insertNotification(user.id);
+          createdNotifications.push(notification);
+        }
+        return res.status(201).json({ message: 'Notifications created for all users', notifications: createdNotifications });
+      }
+
+      return res.status(400).json({ message: 'Invalid target specified' });
+    } catch (err) {
+      console.error('Create notification error:', err.message);
+      res.status(500).json({ message: 'Server error creating notification' });
+    }
+  }
+);
+
+
+// Get Notifications for a User (Users can view own, Admin/Manager with view permission)
+app.get('/api/notifications/:user_id', auth(['user', 'admin', 'manager']), checkPermission('notifications', 'view'), async (req, res) => {
+  const { user_id } = req.params;
+
+  if (isNaN(user_id) || user_id <= 0) {
+    return res.status(400).json({ message: 'Invalid user ID' });
+  }
+
+  // Allow users to view their own notifications without permission check
+  if (req.user.role === 'user' && Number(req.user.id) !== Number(user_id)) {
+    return res.status(403).json({ message: 'Unauthorized to access these notifications' });
+  }
+
+  try {
+    const [notifications] = await db.execute(
+      'SELECT id, user_id, title, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC',
+      [user_id]
+    );
+
+    res.json(notifications.map(notification => ({
+      id: notification.id,
+      user_id: notification.user_id,
+      title: notification.title,
+      message: notification.message,
+      is_read: Boolean(notification.is_read),
+      created_at: notification.created_at
+    })));
+  } catch (err) {
+    console.error('Get notifications error:', err.message);
+    res.status(500).json({ message: 'Server error fetching notifications' });
+  }
+});
+
+// Mark Notification as Read (Users can edit own, Admin/Manager with edit permission)
+app.put('/api/notifications/:id/read', auth(['user', 'admin', 'manager']), checkPermission('notifications', 'edit'), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [notifications] = await db.execute(
+      'SELECT user_id FROM notifications WHERE id = ?',
+      [id]
+    );
+
+    if (notifications.length === 0) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    // Allow users to mark their own notifications without permission check
+    if (req.user.role === 'user' && Number(req.user.id) !== Number(notifications[0].user_id)) {
+      return res.status(403).json({ message: 'Unauthorized to mark this notification' });
+    }
+
+    await db.execute(
+      'UPDATE notifications SET is_read = ? WHERE id = ?',
+      [true, id]
+    );
+
+    broadcast({
+      type: 'notificationRead',
+      notification_id: Number(id),
+      user_id: notifications[0].user_id
+    });
+
+    res.json({ message: 'Notification marked as read' });
+  } catch (err) {
+    console.error('Mark notification read error:', err.message);
+    res.status(500).json({ message: 'Server error marking notification as read' });
+  }
+});
+
+// Delete Notification (Users can delete own, Admin/Manager with delete permission)
+app.delete('/api/notifications/:id', auth(['user', 'admin', 'manager']), checkPermission('notifications', 'delete'), async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const [notifications] = await db.execute(
+      'SELECT user_id FROM notifications WHERE id = ?',
+      [id]
+    );
+
+    if (notifications.length === 0) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    // Allow users to delete their own notifications without permission check
+    if (req.user.role === 'user' && Number(req.user.id) !== Number(notifications[0].user_id)) {
+      return res.status(403).json({ message: 'Unauthorized to delete this notification' });
+    }
+
+    await db.execute('DELETE FROM notifications WHERE id = ?', [id]);
+
+    broadcast({
+      type: 'notificationDeleted',
+      notification_id: Number(id),
+      user_id: notifications[0].user_id
+    });
+
+    res.json({ message: 'Notification deleted' });
+  } catch (err) {
+    console.error('Delete notification error:', err.message);
+    res.status(500).json({ message: 'Server error deleting notification' });
   }
 });
 
