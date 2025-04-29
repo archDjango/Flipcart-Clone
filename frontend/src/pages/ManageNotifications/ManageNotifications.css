@@ -1,0 +1,113 @@
+.manage-notifications {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  h2 {
+    font-size: 24px;
+    margin-bottom: 20px;
+  }
+  
+  .card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  .notification-form h3,
+  .notification-history h3 {
+    font-size: 18px;
+    margin-bottom: 15px;
+  }
+  
+  .form-group {
+    margin-bottom: 15px;
+  }
+  
+  .form-group label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+  
+  .form-group input,
+  .form-group textarea,
+  .form-group select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  
+  .form-group textarea {
+    resize: vertical;
+  }
+  
+  .input-error {
+    border-color: #dc3545;
+  }
+  
+  .error {
+    color: #dc3545;
+    font-size: 12px;
+    margin-top: 5px;
+    display: block;
+  }
+  
+  .form-buttons {
+    display: flex;
+    gap: 10px;
+  }
+  
+  .send-btn {
+    background: #007bff;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  
+  .send-btn:hover {
+    background: #0056b3;
+  }
+  
+  .notification-history table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  
+  .notification-history th,
+  .notification-history td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .notification-history th {
+    background: #f8f9fa;
+    font-weight: bold;
+  }
+  
+  .notification-history tr:hover {
+    background: #f1f1f1;
+  }
+  
+  .spinner {
+    text-align: center;
+    font-size: 16px;
+    padding: 20px;
+  }
+  
+  .error {
+    color: #dc3545;
+    text-align: center;
+    font-size: 16px;
+    padding: 20px;
+  }

@@ -10,6 +10,7 @@ import ManageOrders from '../../components/ManageOrders/ManageOrders';
 import ManageAdmins from '../ManageAdmins/ManageAdmins';
 import ManageReviews from '../ManageReviews/ManageReviews';
 import ManageRoles from '../ManageRoles/ManageRoles';
+import ManageNotifications from '../ManageNotifications/ManageNotifications';
 import PaymentMethodsAnalytics from '../PaymentMethodsAnalytics/PaymentMethodsAnalytics';
 import OrderHeatmap from '../OrderHeatmap/OrderHeatmap';
 import ReturnRequests from '../ReturnRequests/ReturnRequests';
@@ -33,8 +34,8 @@ const AdminDashboard = () => {
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false); // For mobile toggle
-  const [sidebarRetracted, setSidebarRetracted] = useState(false); // For retract/expand
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarRetracted, setSidebarRetracted] = useState(false);
   const token = localStorage.getItem('token');
 
   useEffect(() => {
@@ -43,7 +44,10 @@ const AdminDashboard = () => {
       setLoading(false);
       return;
     }
-    if (permissions === null) return;
+    if (permissions === null) {
+      setLoading(true);
+      return;
+    }
     console.log('Permissions:', permissions, 'Role:', role);
     fetchData();
   }, [filter, role, permissions, token]);
@@ -85,7 +89,7 @@ const AdminDashboard = () => {
         const ordersRes = await axios.get(query, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        ordersData = Array.isArray(ordersRes.data) ? ordersData = ordersRes.data : [];
+        ordersData = Array.isArray(ordersRes.data) ? ordersRes.data : [];
         setOrders(ordersData);
         console.log('Orders fetched:', ordersData);
       }
@@ -251,7 +255,8 @@ const AdminDashboard = () => {
     permissions?.sellers?.view ||
     permissions?.inventory?.view ||
     permissions?.coupons?.view ||
-    permissions?.customers?.view
+    permissions?.customers?.view ||
+    permissions?.notifications?.view
   );
 
   const handleRetractToggle = () => {
@@ -341,6 +346,11 @@ const AdminDashboard = () => {
               <span>{sidebarRetracted ? '👤' : 'Manage Customers'}</span>
             </NavLink>
           )}
+          {permissions?.notifications?.view && (
+            <NavLink to="/admin/notifications" className={({ isActive }) => isActive ? 'active' : ''}>
+              <span>{sidebarRetracted ? '🔔' : 'Manage Notifications'}</span>
+            </NavLink>
+          )}
         </nav>
       </div>
       <div className={`content ${sidebarRetracted ? 'retracted' : ''}`}>
@@ -416,6 +426,7 @@ const AdminDashboard = () => {
                 <Route path="/manage-reviews/*" element={<ManageReviews />} />
                 <Route path="/manage-admins/*" element={<ManageAdmins />} />
                 <Route path="/manage-roles/*" element={<ManageRoles />} />
+                <Route path="/notifications/*" element={<ManageNotifications />} />
                 <Route path="/payment-methods/*" element={<PaymentMethodsAnalytics />} />
                 <Route path="/order-heatmap/*" element={<OrderHeatmap />} />
                 <Route path="/returns/*" element={<ReturnRequests />} />

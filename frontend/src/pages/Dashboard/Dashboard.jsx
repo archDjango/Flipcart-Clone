@@ -4,7 +4,9 @@ import Sidebar from "../../components/Sidebar/Sidebar";
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import "./Dashboard.css";
+import { VerticalTimeline, VerticalTimelineElement } from 'react-vertical-timeline-component';
+import 'react-vertical-timeline-component/style.min.css';
+import './Dashboard.css';
 
 const Dashboard = () => {
   const { user, orders, returns } = useContext(AuthContext);
@@ -53,24 +55,43 @@ const Dashboard = () => {
       setSelectedOrderId(null);
       setSelectedProduct("");
       setReturnReason("");
-      // Optionally refetch returns
       const res = await axios.get('http://localhost:5000/api/user/returns', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      // Assuming AuthContext will handle state update
     } catch (err) {
       console.error('Submit return error:', err);
       toast.error(err.response?.data?.message || 'Failed to submit return request');
     }
   };
 
-  // Check if order is eligible for return (within 30 days and not cancelled)
+  // Check if order is eligible for return
   const isReturnEligible = (order) => {
     if (order.status === 'Cancelled') return false;
     const orderDate = new Date(order.createdAt);
     const now = new Date();
     const daysSinceOrder = (now - orderDate) / (1000 * 60 * 60 * 24);
     return daysSinceOrder <= 30;
+  };
+
+  // Generate timeline events for an order
+  const getTimelineEvents = (order) => {
+    const events = [
+      { status: 'Pending', date: order.createdAt, icon: '⏳' },
+    ];
+    // Simulate status transitions (in a real app, you'd track status changes in the backend)
+    if (order.status !== 'Pending') {
+      events.push({ status: 'Processing', date: new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 1), icon: '⚙️' });
+    }
+    if (['Shipped', 'Delivered'].includes(order.status)) {
+      events.push({ status: 'Shipped', date: new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 1), icon: '🚚' });
+    }
+    if (order.status === 'Delivered') {
+      events.push({ status: 'Delivered', date: new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 3), icon: '✅' });
+    }
+    if (order.status === 'Cancelled') {
+      events.push({ status: 'Cancelled', date: new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 2), icon: '❌' });
+    }
+    return events;
   };
 
   return (
@@ -160,6 +181,19 @@ const Dashboard = () => {
                     </li>
                   ))}
                 </ul>
+                <h4>Order Tracking</h4>
+                <VerticalTimeline layout="1-column-left">
+                  {getTimelineEvents(order).map((event, index) => (
+                    <VerticalTimelineElement
+                      key={index}
+                      date={new Date(event.date).toLocaleString()}
+                      icon={event.icon}
+                      iconStyle={{ background: '#36A2EB', color: '#fff' }}
+                    >
+                      <h4>{event.status}</h4>
+                    </VerticalTimelineElement>
+                  ))}
+                </VerticalTimeline>
               </li>
             ))}
           </ul>
