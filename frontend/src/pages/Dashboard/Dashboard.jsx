@@ -21,12 +21,37 @@ const Dashboard = () => {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState("");
   const [returnReason, setReturnReason] = useState("");
+  const [isSidebarRetracted, setIsSidebarRetracted] = useState(false); // New state for sidebar
 
   // Load user profile from localStorage
   useEffect(() => {
     const storedProfile = JSON.parse(localStorage.getItem("userProfile"));
     if (storedProfile) setProfile(storedProfile);
   }, []);
+
+  // Show toast notifications for recent order status updates
+  useEffect(() => {
+    if (orders.length > 0) {
+      orders.forEach((order) => {
+        if (order.updated_at) {
+          const lastUpdated = new Date(order.updated_at).getTime();
+          const now = new Date().getTime();
+          // Show toast if status updated within the last 5 seconds
+          if (now - lastUpdated < 5000) {
+            toast.info(`Order #${order.id} status updated to ${order.status}`, {
+              position: "top-right",
+              autoClose: 3000,
+            });
+          }
+        }
+      });
+    }
+  }, [orders]);
+
+  // Toggle sidebar
+  const toggleSidebar = () => {
+    setIsSidebarRetracted(!isSidebarRetracted);
+  };
 
   // Handle profile updates
   const handleProfileUpdate = (e) => {
@@ -58,6 +83,7 @@ const Dashboard = () => {
       const res = await axios.get('http://localhost:5000/api/user/returns', {
         headers: { Authorization: `Bearer ${token}` },
       });
+      // Note: Update returns state via AuthContext if needed
     } catch (err) {
       console.error('Submit return error:', err);
       toast.error(err.response?.data?.message || 'Failed to submit return request');
@@ -76,27 +102,60 @@ const Dashboard = () => {
   // Generate timeline events for an order
   const getTimelineEvents = (order) => {
     const events = [
-      { status: 'Pending', date: order.createdAt, icon: '⏳' },
+      {
+        status: 'Pending',
+        date: order.createdAt,
+        icon: '⏳',
+        description: 'Order placed and awaiting confirmation.',
+      },
     ];
-    // Simulate status transitions (in a real app, you'd track status changes in the backend)
+
+    // Add status transitions based on current status and updated_at
     if (order.status !== 'Pending') {
-      events.push({ status: 'Processing', date: new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 1), icon: '⚙️' });
+      events.push({
+        status: 'Processing',
+        date: order.updated_at || new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 1),
+        icon: '⚙️',
+        description: 'Order is being prepared.',
+      });
     }
     if (['Shipped', 'Delivered'].includes(order.status)) {
-      events.push({ status: 'Shipped', date: new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 1), icon: '🚚' });
+      events.push({
+        status: 'Shipped',
+        date: order.updated_at || new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 1),
+        icon: '🚚',
+        description: 'Order has been shipped.',
+      });
     }
     if (order.status === 'Delivered') {
-      events.push({ status: 'Delivered', date: new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 3), icon: '✅' });
+      events.push({
+        status: 'Delivered',
+        date: order.updated_at || new Date(order.createdAt).setDate(new Date(order.createdAt).getDate() + 3),
+        icon: '✅',
+        description: 'Order has been delivered.',
+      });
     }
     if (order.status === 'Cancelled') {
-      events.push({ status: 'Cancelled', date: new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 2), icon: '❌' });
+      events.push({
+        status: 'Cancelled',
+        date: order.updated_at || new Date(order.createdAt).setHours(new Date(order.createdAt).getHours() + 2),
+        icon: '❌',
+        description: 'Order has been cancelled.',
+      });
     }
+
     return events;
   };
 
   return (
-    <div className="dashboard-container">
+    <div className={`dashboard-container ${isSidebarRetracted ? 'retracted' : ''}`}>
       <Sidebar />
+      <button
+        className={`sidebar-toggle ${isSidebarRetracted ? 'retracted' : ''}`}
+        onClick={toggleSidebar}
+      >
+        {isSidebarRetracted ? '☰' : '✕'}
+      </button>
       <div className="dashboard-content">
         <h2>Welcome, {profile.name || user?.name || "User"}!</h2>
 
@@ -191,6 +250,7 @@ const Dashboard = () => {
                       iconStyle={{ background: '#36A2EB', color: '#fff' }}
                     >
                       <h4>{event.status}</h4>
+                      <p>{event.description}</p>
                     </VerticalTimelineElement>
                   ))}
                 </VerticalTimeline>
