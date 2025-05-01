@@ -1,18 +1,21 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect, useContext } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import ProductCard from "../../components/ProductCard/ProductCard";
+import { CompareContext } from "../../context/CompareContext";
 import "./ProductsPage.css";
 
 const PRODUCTS_PER_PAGE = 16;
 
 const ProductsPage = () => {
+  const { selectedProductIds, toggleProduct, clearSelectedProducts, error: contextError } = useContext(CompareContext);
+  const navigate = useNavigate();
   const [allProducts, setAllProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
   const [filters, setFilters] = useState({
     categories: [],
     priceRange: [0, 100000],
@@ -20,8 +23,7 @@ const ProductsPage = () => {
   });
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  // Sample categories (replace with dynamic fetch if available)
-  const categories = ["Electronics", "Clothing", "Home & Kitchen", "Books", "Sports"];
+  const categories = ["Electronics", "Clothing", "Home & Kitchen", "Books", "Sports", "Accessories"];
 
   const fetchAllProducts = async (retryCount = 0) => {
     setLoading(true);
@@ -32,35 +34,17 @@ const ProductsPage = () => {
           offset: 0,
         },
       });
-
-      console.log("Products fetched:", {
-        productCount: response.data.products?.length || 0,
-        total: response.data.total || 0,
-        sampleProduct: response.data.products[0], // Log sample for debugging
-      });
-
       setAllProducts(response.data.products || []);
       setFilteredProducts(response.data.products || []);
       setTotalPages(Math.ceil((response.data.total || 0) / PRODUCTS_PER_PAGE));
-      setError("");
+      setLocalError("");
       setLoading(false);
     } catch (err) {
-      console.error("Fetch products error:", {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-      });
-
       if (retryCount < 2) {
-        console.log(`Retrying fetch products (attempt ${retryCount + 2})...`);
         setTimeout(() => fetchAllProducts(retryCount + 1), 1000);
         return;
       }
-
-      setError(
-        "Failed to load products: " +
-          (err.response?.data?.message || err.message || "Please try again later.")
-      );
+      setLocalError("Failed to load products: " + (err.response?.data?.message || err.message));
       setLoading(false);
     }
   };
@@ -70,7 +54,6 @@ const ProductsPage = () => {
   }, []);
 
   useEffect(() => {
-    // Apply filters
     const filtered = allProducts.filter((product) => {
       const matchesCategory =
         filters.categories.length === 0 ||
@@ -111,9 +94,36 @@ const ProductsPage = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleCompare = () => {
+    console.log('handleCompare called with selectedProductIds:', selectedProductIds);
+    if (selectedProductIds.length < 2) {
+      setLocalError("Select at least 2 products to compare");
+      setTimeout(() => setLocalError(""), 3000);
+      return;
+    }
+    if (selectedProductIds.length > 4) {
+      setLocalError("You can compare up to 4 products");
+      setTimeout(() => setLocalError(""), 3000);
+      return;
+    }
+    navigate('/compare');
+  };
+
+  const handleRemoveFromCompare = (productId) => {
+    toggleProduct(productId);
+  };
+
+  const handleClearAll = () => {
+    clearSelectedProducts();
+  };
+
   const paginatedProducts = filteredProducts.slice(
     (currentPage - 1) * PRODUCTS_PER_PAGE,
     currentPage * PRODUCTS_PER_PAGE
+  );
+
+  const selectedProducts = allProducts.filter((product) =>
+    selectedProductIds.includes(product.id)
   );
 
   const toggleFilters = () => {
@@ -121,7 +131,7 @@ const ProductsPage = () => {
   };
 
   if (loading) return <div className="loading">Loading...</div>;
-  if (error) return <div className="error">{error}</div>;
+  if (localError || contextError) return <div className="error">{localError || contextError}</div>;
 
   return (
     <div className="products-page-container">
@@ -190,6 +200,13 @@ const ProductsPage = () => {
                 <option>Price: High to Low</option>
                 <option>Rating</option>
               </select>
+              <button
+                onClick={handleCompare}
+                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                disabled={selectedProductIds.length < 2 || selectedProductIds.length > 4}
+              >
+                Compare Now ({selectedProductIds.length}/4)
+              </button>
             </div>
           </div>
           {filteredProducts.length === 0 ? (
@@ -222,6 +239,45 @@ const ProductsPage = () => {
           )}
         </div>
       </div>
+      {/* Fixed Bottom Bar */}
+      {selectedProductIds.length > 0 && (
+        <div className="comparison-bar fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 flex items-center justify-between z-50">
+          <div className="selected-comparison-container flex items-center space-x-4 overflow-x-auto">
+            {selectedProducts.map((product) => (
+              <div key={product.id} className="selected-comparison-item flex items-center space-x-2">
+                <img
+                  src={product.image}
+                  alt={product.name}
+                  className="comparison-product-image w-20 h-20 object-cover rounded"
+                />
+                <span className="comparison-product-name text-sm text-gray-700">{product.name}</span>
+                <button
+                  onClick={() => handleRemoveFromCompare(product.id)}
+                  className="remove-comparison-item text-red-500 hover:text-red-700"
+                  aria-label={`Remove ${product.name} from comparison`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleClearAll}
+              className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+            >
+              Clear All
+            </button>
+            <button
+              onClick={handleCompare}
+              className="compare-bar-button bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              disabled={selectedProductIds.length < 2 || selectedProductIds.length > 4}
+            >
+              Compare Now ({selectedProductIds.length}/4)
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
