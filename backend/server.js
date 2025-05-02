@@ -270,156 +270,122 @@ app.get('/api/orders', auth(['admin', 'manager']), checkPermission('orders', 'vi
   }
 });
 
-// Update Order Status (Admin and Manager)
-// Create a new order (User only)
-app.post('/api/orders', auth(['user']), async (req, res) => {
-  const { items, total_Price, shippingAddress, payment_method, coupon_code } = req.body;
-  if (!items || !shippingAddress || !payment_method) {
-    return res.status(400).json({ message: 'Items, shipping address, and payment method are required' });
+
+// Update order status endpoint with WebSocket broadcast
+app.put('/api/orders/:id', auth(['admin', 'manager']), async (req, res) => {
+  const { status } = req.body;
+  const orderId = req.params.id;
+
+  if (!['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'].includes(status)) {
+    return res.status(400).json({ message: 'Invalid status' });
   }
+
   try {
-    let order_total = 0;
-    const itemDetails = [];
-
-    // Calculate total and validate items
-    for (const item of items) {
-      const [products] = await db.execute(
-        `SELECT id, price, stock FROM products WHERE id = ?`,
-        [item.productId]
-      );
-      if (products.length === 0) {
-        return res.status(404).json({ message: `Product ID ${item.productId} not found` });
-      }
-      const product = products[0];
-      if (product.stock < item.quantity) {
-        return res.status(400).json({ message: `Insufficient stock for product ID ${item.productId}` });
-      }
-      const subtotal = product.price * item.quantity;
-      order_total += subtotal;
-      itemDetails.push({ product_id: item.productId, quantity: item.quantity, price: product.price, subtotal });
+    // Fetch order to get user_id
+    const [order] = await pool.query('SELECT user_id FROM orders WHERE id = ?', [orderId]);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
 
-    // Apply coupon if provided
-    let discount = 0;
-    let coupon_id = null;
-    if (coupon_code) {
-      const [coupons] = await db.execute(
-        `SELECT id, discount_type, discount_value, min_order_amount
-         FROM coupons
-         WHERE code = ? AND status = 'active' AND expiry_date > NOW()`,
-        [coupon_code]
-      );
-      if (coupons.length === 0) {
-        return res.status(400).json({ message: 'Invalid or expired coupon' });
-      }
-      const coupon = coupons[0];
-      if (order_total < coupon.min_order_amount) {
-        return res.status(400).json({
-          message: `Order total must be at least ${coupon.min_order_amount}`
-        });
-      }
-      if (coupon.discount_type === 'flat') {
-        discount = coupon.discount_value;
-      } else if (coupon.discount_type === 'percentage') {
-        discount = (coupon.discount_value / 100) * order_total;
-      }
-      coupon_id = coupon.id;
-    }
+    // Update order status and updated_at
+    await pool.query('UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?', [status, orderId]);
 
-    const final_total = Number(order_total) - Number(discount);
+    // Fetch updated order details to return
+    const [updatedOrder] = await pool.query('SELECT * FROM orders WHERE id = ?', [orderId]);
 
-    // Validate frontend-provided totalPrice
-    if (total_Price == null || Math.abs(total_Price - final_total) > 0.01) {
-      return res.status(400).json({ message: 'Provided totalPrice does not match calculated total' });
-    }
-
-    // Create order
-    const [orderResult] = await db.execute(
-      `INSERT INTO orders (user_id, total_Price, shipping_address, payment_method, coupon_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [req.user.id, final_total, shippingAddress, payment_method, coupon_id]
-    );
-    const order_id = orderResult.insertId;
-
-    // Insert order items
-    for (const item of itemDetails) {
-      await db.execute(
-        `INSERT INTO order_items (order_id, product_id, quantity, price)
-         VALUES (?, ?, ?, ?)`,
-        [order_id, item.product_id, item.quantity, item.price]
-      );
-      // Update product stock
-      await db.execute(
-        `UPDATE products SET stock = stock - ? WHERE id = ?`,
-        [item.quantity, item.product_id]
-      );
-    }
-
-    // Log coupon usage if coupon was applied
-    if (coupon_id) {
-      await db.execute(
-        `INSERT INTO coupon_usage (coupon_id, order_id, user_id)
-         VALUES (?, ?, ?)`,
-        [coupon_id, order_id, req.user.id]
-      );
-    }
-
-    // Broadcast order creation
-    broadcast({ type: 'newOrder', order_id, user_id: req.user.id, final_total });
-
-    res.status(201).json({
-      id: order_id,
-      user_id: req.user.id,
-      total_price: Number(final_total),
-      shippingAddress,
-      payment_method,
-      coupon_id,
-      items: itemDetails,
-      discount: Number(discount)
-    });
-  } catch (err) {
-    console.error('Create order error:', err.message);
-    res.status(500).json({ message: 'Server error creating order', error: err.message });
-  }
-});
-// Get User Orders (User Only)
-app.get('/api/user/orders', auth(['user']), async (req, res) => {
-  try {
-    const [orders] = await db.execute(
-      `SELECT o.id, o.total_price, o.status, o.created_at,
-              oi.product_name AS item_name, oi.price AS item_price, oi.quantity
-       FROM orders o
-       LEFT JOIN order_items oi ON o.id = oi.order_id
-       WHERE o.user_id = ?`,
-      [req.user.id]
-    );
-    const orderMap = {};
-    orders.forEach(row => {
-      if (!orderMap[row.id]) {
-        orderMap[row.id] = {
-          id: row.id,
-          totalPrice: row.total_price,
-          status: row.status,
-          createdAt: row.created_at,
-          items: []
-        };
-      }
-      if (row.item_name) {
-        orderMap[row.id].items.push({
-          name: row.item_name,
-          price: row.item_price,
-          quantity: row.quantity
-        });
+    // Broadcast WebSocket message for order status update
+    const wsMessage = {
+      type: 'orderStatusUpdate',
+      order_id: orderId,
+      user_id: order.user_id,
+      status: status,
+      updated_at: new Date().toISOString(),
+    };
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(wsMessage));
       }
     });
-    res.json(Object.values(orderMap));
+
+    // Create a notification for the user
+    const notification = {
+      user_id: order.user_id,
+      message: `Your order #${orderId} has been updated to ${status}.`,
+      type: 'order_update',
+    };
+    await pool.query(
+      'INSERT INTO notifications (user_id, message, type, created_at) VALUES (?, ?, ?, NOW())',
+      [notification.user_id, notification.message, notification.type]
+    );
+
+    // Broadcast notification via WebSocket
+    const notificationMessage = {
+      type: 'newNotification',
+      notification: {
+        user_id: notification.user_id,
+        message: notification.message,
+        type: notification.type,
+        created_at: new Date().toISOString(),
+      },
+    };
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(notificationMessage));
+      }
+    });
+
+    res.json({ message: 'Order status updated', order: updatedOrder[0] });
   } catch (err) {
-    console.error('Get user orders error:', err.message, err.stack);
+    console.error('Update order error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Add Order (User Only)
+
+
+// Updated: Get User Orders (Fix 'o.total' Error)
+app.get('/api/user/orders', auth(['user']), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const [orders] = await db.execute(
+      `SELECT o.id, o.total_price AS totalPrice, o.status, o.created_at AS createdAt, o.updated_at,
+              oi.product_name AS name, oi.price, oi.quantity
+       FROM orders o
+       LEFT JOIN order_items oi ON o.id = oi.order_id
+       WHERE o.user_id = ?
+       ORDER BY o.created_at DESC`,
+      [userId]
+    );
+
+    // Group order items by order
+    const ordersMap = orders.reduce((acc, row) => {
+      if (!acc[row.id]) {
+        acc[row.id] = {
+          id: row.id,
+          totalPrice: Number(row.totalPrice),
+          status: row.status,
+          createdAt: row.createdAt,
+          updated_at: row.updated_at,
+          items: [],
+        };
+      }
+      if (row.name) {
+        acc[row.id].items.push({
+          name: row.name,
+          price: Number(row.price),
+          quantity: row.quantity,
+        });
+      }
+      return acc;
+    }, {});
+
+    const ordersList = Object.values(ordersMap);
+    res.json(ordersList);
+  } catch (err) {
+    console.error('Fetch user orders error:', err.message);
+    res.status(500).json({ message: 'Server error fetching user orders' });
+  }
+});
 // Create a new order (User only)
 app.post('/api/orders', auth(['user']), async (req, res) => {
   const { items, shipping_address, payment_method, coupon_code } = req.body;
@@ -485,19 +451,19 @@ app.post('/api/orders', auth(['user']), async (req, res) => {
     );
     const order_id = orderResult.insertId;
 
-    // Insert order items
-    for (const item of itemDetails) {
-      await db.execute(
-        `INSERT INTO order_items (order_id, product_id, quantity, price)
-         VALUES (?, ?, ?, ?)`,
-        [order_id, item.product_id, item.quantity, item.price]
-      );
-      // Update product stock
-      await db.execute(
-        `UPDATE products SET stock = stock - ? WHERE id = ?`,
-        [item.quantity, item.product_id]
-      );
-    }
+    // Existing code in POST /api/orders
+for (const item of itemDetails) {
+  await db.execute(
+    `INSERT INTO order_items (order_id, product_id, quantity, price)
+     VALUES (?, ?, ?, ?)`,
+    [order_id, item.product_id, item.quantity, item.price]
+  );
+  // Update product stock in product_pricing
+  await db.execute(
+    `UPDATE product_pricing SET stock_quantity = stock_quantity - ? WHERE product_id = ?`,
+    [item.quantity, item.product_id]
+  );
+}
 
     // Log coupon usage if coupon was applied
     if (coupon_id) {
@@ -703,12 +669,10 @@ app.post('/api/products', auth(['admin', 'manager']), checkPermission('products'
     }
 
     const [result] = await db.execute(
-      `INSERT INTO products (name, price, stock, category, description, image, low_stock_threshold, seller_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, category, description, image, low_stock_threshold, seller_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         name,
-        price,
-        stock,
         category,
         description || null,
         image,
@@ -716,6 +680,12 @@ app.post('/api/products', auth(['admin', 'manager']), checkPermission('products'
         seller_id || null
       ]
     );
+    // Insert initial pricing
+await db.execute(
+  `INSERT INTO product_pricing (product_id, base_price, current_price, stock_quantity, demand_level, price_change_reason)
+   VALUES (?, ?, ?, ?, ?, ?)`,
+  [result.insertId, price, price, stock, 0, 'Initial setup']
+);
     const [newProduct] = await db.execute(
       `SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
               p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
@@ -785,13 +755,11 @@ app.put('/api/products/:id', auth(['admin', 'manager']), checkPermission('produc
 
     await db.execute(
       `UPDATE products SET
-       name = ?, price = ?, stock = ?, category = ?, description = ?, image = ?,
+       name = ?, category = ?, description = ?, image = ?,
        low_stock_threshold = ?, seller_id = ?
        WHERE id = ?`,
       [
         name,
-        price,
-        stock,
         category,
         description || null,
         image || null,
@@ -800,6 +768,7 @@ app.put('/api/products/:id', auth(['admin', 'manager']), checkPermission('produc
         id
       ]
     );
+
     const [updatedProduct] = await db.execute(
       `SELECT p.id, p.name, p.price, p.stock, p.category, p.created_at, p.rating, p.image, p.description,
               p.low_stock_threshold, p.seller_id, s.company_name AS seller_name
@@ -895,8 +864,9 @@ app.post('/api/products/:id/restock', auth(['admin', 'manager']), checkPermissio
     const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE id = ?', [id]);
     if (product.length === 0) return res.status(404).json({ message: 'Product not found' });
 
-    const newStock = Number(product[0].stock) + Number(quantity);
-    await db.execute('UPDATE products SET stock = ? WHERE id = ?', [newStock, id]);
+// In POST /api/products/:id/restock
+const newStock = Number(product[0].stock) + Number(quantity); // Note: This uses old products.stock, adjust if needed
+await db.execute('UPDATE product_pricing SET stock_quantity = ? WHERE product_id = ?', [newStock, id]);
 
     await db.execute(
       'INSERT INTO inventory_transactions (product_id, quantity, transaction_type, user_id, created_at) VALUES (?, ?, ?, ?, NOW())',
@@ -1041,9 +1011,8 @@ app.post('/api/products/generate-description', auth(['admin', 'manager']), check
   }
 
   try {
-    const prompt = `Generate a concise and engaging product description (max 100 words) for a ${category} item named "${title}"${
-      keywords ? ` with the following features: ${keywords}` : ''
-    }. Highlight its benefits and appeal to potential buyers.`;
+    const prompt = `Generate a concise and engaging product description (max 100 words) for a ${category} item named "${title}"${keywords ? ` with the following features: ${keywords}` : ''
+      }. Highlight its benefits and appeal to potential buyers.`;
 
     const response = await axios.post(
       'https://api.cohere.ai/v1/generate',
@@ -2148,7 +2117,7 @@ app.get('/api/analytics/order-activity', auth(['admin', 'manager']), checkPermis
     const heatmapData = [];
     for (let day = 1; day <= 7; day++) {
       for (let hour = 0; hour < 24; hour++) {
-        const entry = rows.find(row => 
+        const entry = rows.find(row =>
           row.day === day && row.hour === hour
         );
         heatmapData.push({
@@ -2278,7 +2247,7 @@ app.put('/api/returns/:id/approve', auth(['admin', 'manager']), checkPermission(
     const [product] = await db.execute('SELECT id, stock, low_stock_threshold FROM products WHERE name = ?', [existing[0].product_name]);
     if (product.length > 0) {
       await db.execute(
-        'UPDATE products SET stock = stock + 1 WHERE id = ?',
+        'UPDATE product_pricing SET stock_quantity = stock_quantity + 1 WHERE product_id = ?',
         [product[0].id]
       );
 
@@ -2321,6 +2290,31 @@ app.put('/api/returns/:id/reject', auth(['admin', 'manager']), checkPermission('
   }
 });
 
+// New: Get User Returns (Fix 404 Error)
+app.get('/api/user/returns', auth(['user']), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const [rows] = await db.execute(
+      `SELECT r.id, r.order_id AS orderId, r.user_id, r.product_name AS productName, r.reason, r.status, r.created_at AS createdAt
+       FROM returns r
+       WHERE r.user_id = ?
+       ORDER BY r.created_at DESC`,
+      [userId]
+    );
+    res.json(rows.map(row => ({
+      id: row.id,
+      orderId: row.orderId,
+      userId: row.user_id,
+      productName: row.productName,
+      reason: row.reason,
+      status: row.status,
+      createdAt: row.createdAt
+    })));
+  } catch (err) {
+    console.error('Fetch user returns error:', err.message);
+    res.status(500).json({ message: 'Server error fetching user returns' });
+  }
+});
 
 // Add a new seller (Admin only)
 app.post('/api/sellers', auth(['admin']), checkPermission('sellers', 'edit'), async (req, res) => {
@@ -2847,6 +2841,7 @@ app.post('/generate-recommendations/:user_id', auth(['user', 'admin', 'manager']
 
 
 // Create Notification (Admin, Manager with create permission)
+
 app.post(
   '/api/notifications',
   auth(['admin', 'manager']),
@@ -2929,8 +2924,8 @@ app.post(
 );
 
 
-// Get Notifications for a User (Users can view own, Admin/Manager with view permission)
-app.get('/api/notifications/:user_id', auth(['user', 'admin', 'manager']), checkPermission('notifications', 'view'), async (req, res) => {
+// Updated: Get Notifications for a User (Fix 403 Error)
+app.get('/api/notifications/:user_id', auth(['user', 'admin', 'manager']), async (req, res) => {
   const { user_id } = req.params;
 
   if (isNaN(user_id) || user_id <= 0) {
@@ -2939,7 +2934,24 @@ app.get('/api/notifications/:user_id', auth(['user', 'admin', 'manager']), check
 
   // Allow users to view their own notifications without permission check
   if (req.user.role === 'user' && Number(req.user.id) !== Number(user_id)) {
-    return res.status(403).json({ message: 'Unauthorized to access these notifications' });
+    // For users accessing others' notifications, check permissions
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'No token provided' });
+    try {
+      const decoded = req.user;
+      const [roles] = await db.execute(
+        `SELECT r.notifications_view FROM user_roles ur
+         JOIN roles r ON ur.role_id = r.id
+         WHERE ur.user_id = ?`,
+        [decoded.id]
+      );
+      if (!roles.length || !roles.some(role => role.notifications_view)) {
+        return res.status(403).json({ message: 'No view permission for notifications' });
+      }
+    } catch (err) {
+      console.error('Permission check failed:', err.message);
+      return res.status(401).json({ message: 'Invalid token or permission error' });
+    }
   }
 
   try {
@@ -3030,6 +3042,215 @@ app.delete('/api/notifications/:id', auth(['user', 'admin', 'manager']), checkPe
   } catch (err) {
     console.error('Delete notification error:', err.message);
     res.status(500).json({ message: 'Server error deleting notification' });
+  }
+});
+
+
+// POST /api/compare - Save a comparison list
+app.post('/api/compare', auth(['user']), async (req, res) => {
+  const { product_ids } = req.body;
+  if (!product_ids || !Array.isArray(product_ids) || product_ids.length < 2 || product_ids.length > 4) {
+    return res.status(400).json({ message: '2 to 4 product IDs are required' });
+  }
+
+  try {
+    // Validate product IDs
+    const placeholders = product_ids.map(() => '?').join(',');
+    const [products] = await db.execute(
+      `SELECT id FROM products WHERE id IN (${placeholders})`,
+      product_ids
+    );
+    if (products.length !== product_ids.length) {
+      return res.status(400).json({ message: 'One or more product IDs are invalid' });
+    }
+
+    // Save comparison
+    const productIdsString = product_ids.join(',');
+    const [result] = await db.execute(
+      'INSERT INTO product_comparisons (user_id, product_ids, created_at) VALUES (?, ?, NOW())',
+      [req.user.id, productIdsString]
+    );
+
+    res.status(201).json({ id: result.insertId, user_id: req.user.id, product_ids: productIdsString });
+  } catch (err) {
+    console.error('Save comparison error:', err.message);
+    res.status(500).json({ message: 'Server error saving comparison' });
+  }
+});
+
+// GET /api/compare/:user_id - Fetch saved comparisons
+app.get('/api/compare/:user_id', auth(['user']), async (req, res) => {
+  const { user_id } = req.params;
+  if (Number(user_id) !== req.user.id) {
+    return res.status(403).json({ message: 'Unauthorized to access comparisons' });
+  }
+
+  try {
+    const [rows] = await db.execute(
+      'SELECT id, product_ids, created_at FROM product_comparisons WHERE user_id = ? ORDER BY created_at DESC',
+      [user_id]
+    );
+
+    const comparisons = rows.map(row => ({
+      id: row.id,
+      product_ids: row.product_ids.split(',').map(Number),
+      created_at: row.created_at
+    }));
+
+    res.json(comparisons);
+  } catch (err) {
+    console.error('Fetch comparisons error:', err.message);
+    res.status(500).json({ message: 'Server error fetching comparisons' });
+  }
+});
+
+app.get('/api/product-price/:product_id', async (req, res) => {
+  const { product_id } = req.params;
+
+  if (isNaN(product_id) || product_id <= 0) {
+    return res.status(400).json({ message: 'Invalid product ID' });
+  }
+
+  try {
+    // Fetch product pricing details
+    const [pricingRows] = await db.execute(
+      `SELECT pp.base_price, pp.current_price, pp.stock_quantity, pp.demand_level, pp.price_update_time, pp.price_change_reason,
+              p.low_stock_threshold
+       FROM product_pricing pp
+       JOIN products p ON pp.product_id = p.id
+       WHERE pp.product_id = ?`,
+      [product_id]
+    );
+
+    if (pricingRows.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    const pricing = pricingRows[0];
+
+    // Calculate demand-based adjustment
+    let priceAdjustment = 0;
+    if (pricing.demand_level > 5) {
+      priceAdjustment += (pricing.demand_level - 5) * 0.02; // +2% per level above 5
+    } else if (pricing.demand_level < 5) {
+      priceAdjustment -= (5 - pricing.demand_level) * 0.01; // -1% per level below 5
+    }
+
+    // Stock-based adjustment
+    if (pricing.stock_quantity <= pricing.low_stock_threshold) {
+      priceAdjustment += 0.05; // +5% for low stock
+    }
+
+    // Calculate new current_price
+    const newCurrentPrice = Number(pricing.base_price) * (1 + priceAdjustment);
+    const priceChangeReason = priceAdjustment > 0
+      ? `Price increased due to ${pricing.demand_level > 5 ? 'high demand' : ''}${pricing.demand_level > 5 && pricing.stock_quantity <= pricing.low_stock_threshold ? ' and ' : ''}${pricing.stock_quantity <= pricing.low_stock_threshold ? 'low stock' : ''}`
+      : priceAdjustment < 0
+        ? 'Price decreased due to low demand'
+        : 'No price change';
+
+    // Update current_price and price_change_reason if changed
+    if (Math.abs(newCurrentPrice - pricing.current_price) > 0.01) {
+      await db.execute(
+        `UPDATE product_pricing
+         SET current_price = ?, price_change_reason = ?, price_update_time = NOW()
+         WHERE product_id = ?`,
+        [newCurrentPrice.toFixed(2), priceChangeReason, product_id]
+      );
+
+      // Broadcast price update via WebSocket
+      broadcast({
+        type: 'priceUpdate',
+        product_id: Number(product_id),
+        base_price: Number(pricing.base_price),
+        current_price: newCurrentPrice.toFixed(2),
+        price_change_reason: priceChangeReason
+      });
+    }
+
+    res.json({
+      product_id: Number(product_id),
+      base_price: Number(pricing.base_price),
+      current_price: newCurrentPrice.toFixed(2),
+      stock_quantity: pricing.stock_quantity,
+      demand_level: pricing.demand_level,
+      price_update_time: pricing.price_update_time,
+      price_change_reason: priceChangeReason
+    });
+  } catch (err) {
+    console.error('Get product price error:', err.message);
+    res.status(500).json({ message: 'Server error fetching product price' });
+  }
+});
+
+app.post('/api/product-price/update', auth(['admin', 'manager']), checkPermission('products', 'edit'), async (req, res) => {
+  const { product_id, base_price, stock_quantity, demand_level, price_change_reason } = req.body;
+
+  if (!product_id || base_price == null || stock_quantity == null || demand_level == null || !price_change_reason) {
+    return res.status(400).json({ message: 'Product ID, base price, stock quantity, demand level, and price change reason are required' });
+  }
+
+  if (isNaN(product_id) || product_id <= 0 || demand_level < 0 || demand_level > 10) {
+    return res.status(400).json({ message: 'Invalid product ID or demand level' });
+  }
+
+  try {
+    // Verify product exists
+    const [products] = await db.execute('SELECT id, low_stock_threshold FROM products WHERE id = ?', [product_id]);
+    if (products.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // Calculate dynamic price based on demand and stock
+    let priceAdjustment = 0;
+    if (demand_level > 5) {
+      priceAdjustment += (demand_level - 5) * 0.02; // +2% per level above 5
+    } else if (demand_level < 5) {
+      priceAdjustment -= (5 - demand_level) * 0.01; // -1% per level below 5
+    }
+    if (stock_quantity <= products[0].low_stock_threshold) {
+      priceAdjustment += 0.05; // +5% for low stock
+    }
+    const newCurrentPrice = Number(base_price) * (1 + priceAdjustment);
+
+    // Update or insert into product_pricing
+    const [existing] = await db.execute('SELECT id FROM product_pricing WHERE product_id = ?', [product_id]);
+    if (existing.length > 0) {
+      await db.execute(
+        `UPDATE product_pricing
+         SET base_price = ?, current_price = ?, stock_quantity = ?, demand_level = ?,
+             price_change_reason = ?, price_update_time = NOW()
+         WHERE product_id = ?`,
+        [base_price, newCurrentPrice.toFixed(2), stock_quantity, demand_level, price_change_reason, product_id]
+      );
+    } else {
+      await db.execute(
+        `INSERT INTO product_pricing (product_id, base_price, current_price, stock_quantity, demand_level, price_change_reason)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [product_id, base_price, newCurrentPrice.toFixed(2), stock_quantity, demand_level, price_change_reason]
+      );
+    }
+
+    // Broadcast price update
+    broadcast({
+      type: 'priceUpdate',
+      product_id: Number(product_id),
+      base_price: Number(base_price),
+      current_price: newCurrentPrice.toFixed(2),
+      price_change_reason
+    });
+
+    res.json({
+      product_id: Number(product_id),
+      base_price: Number(base_price),
+      current_price: newCurrentPrice.toFixed(2),
+      stock_quantity,
+      demand_level,
+      price_change_reason
+    });
+  } catch (err) {
+    console.error('Update product price error:', err.message);
+    res.status(500).json({ message: 'Server error updating product price' });
   }
 });
 
