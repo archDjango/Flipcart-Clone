@@ -1,0 +1,186 @@
+.product-questions-container {
+    margin-top: 2rem;
+    padding: 1rem;
+    background: #f9f9f9;
+    border-radius: 8px;
+  }
+  
+  .product-questions-container h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .ask-question-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .ask-question-form textarea {
+    resize: vertical;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  
+  .ask-question-form button {
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .ask-question-form button:hover {
+    background: #218838;
+  }
+  
+  .questions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .question-item {
+    background: white;
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  .question-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+  
+  .question-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+  
+  .toggle-icon {
+    font-size: 1.2rem;
+    font-weight: bold;
+  }
+  
+  .question-meta {
+    font-size: 0.9rem;
+    color: #666;
+    margin: 0.5rem 0;
+  }
+  
+  .answers-section {
+    margin-top: 1rem;
+    padding-left: 1rem;
+    border-left: 2px solid #ddd;
+  }
+  
+  .answer-item {
+    margin-bottom: 1rem;
+  }
+  
+  .answer-meta {
+    font-size: 0.9rem;
+    color: #666;
+  }
+  
+  .most-helpful {
+    color: #28a745;
+    font-weight: bold;
+    margin-left: 0.5rem;
+  }
+  
+  .vote-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  
+  .vote-buttons button {
+    padding: 0.3rem 0.6rem;
+    background: #f0f0f0;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .vote-buttons button:hover {
+    background: #e0e0e0;
+  }
+  
+  .mark-helpful-btn {
+    padding: 0.3rem 0.6rem;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 0.5rem;
+  }
+  
+  .mark-helpful-btn:hover {
+    background: #0056b3;
+  }
+  
+  .flag-btn {
+    padding: 0.3rem 0.6rem;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 0.5rem;
+  }
+  
+  .flag-btn:hover {
+    background: #c82333;
+  }
+  
+  .moderate-btn {
+    padding: 0.3rem 0.6rem;
+    background: #ffc107;
+    color: black;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 0.5rem;
+  }
+  
+  .moderate-btn:hover {
+    background: #e0a800;
+  }
+  
+  .answer-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  
+  .answer-form textarea {
+    resize: vertical;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  
+  .answer-form button {
+    align-self: flex-start;
+    padding: 0.5rem 1rem;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  .answer-form button:hover {
+    background: #0056b3;
+  }
