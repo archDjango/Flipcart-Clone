@@ -14,7 +14,7 @@
   flex-shrink: 0;
   transition: transform 0.3s ease; /* Smooth slide animation */
   background-color: #ffffff; /* Ensure sidebar has a background to avoid transparency */
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1); /* Optional: subtle shadow for depth */
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
   position: relative; /* Ensure z-index works */
   z-index: 10;
 }
@@ -381,6 +381,102 @@
   font-weight: 500;
 }
 
+/* Activity Timeline */
+.activity-timeline {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.activity-timeline__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.activity-timeline__item {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-radius: 4px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.activity-timeline__item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.activity-timeline__item--login {
+  background-color: #d4edda;
+  color: #28a745;
+}
+
+.activity-timeline__item--download {
+  background-color: #d1ecf1;
+  color: #17a2b8;
+}
+
+.activity-timeline__item--account_update {
+  background-color: #e2d9f3;
+  color: #6f42c1;
+}
+
+.activity-timeline__item--purchase {
+  background-color: #fff3cd;
+  color: #e0a800;
+}
+
+.activity-timeline__item--view {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.activity-timeline__item--default {
+  background-color: #f8f9fa;
+  color: #6c757d;
+}
+
+.activity-timeline__icon-container {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 1rem;
+}
+
+.activity-timeline__icon {
+  width: 20px;
+  height: 20px;
+}
+
+.activity-timeline__content {
+  flex-grow: 1;
+}
+
+.activity-timeline__description {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: 0 0 0.25rem;
+}
+
+.activity-timeline__timestamp {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 0;
+}
+
+.activity-timeline__metadata {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap; /* Preserve JSON formatting */
+}
+
 /* Modal for Return Request */
 .modal {
   position: fixed;
@@ -507,7 +603,8 @@
 
   .profile-card,
   .profile-form-container,
-  .order-item {
+  .order-item,
+  .activity-timeline {
     margin-bottom: 1rem;
   }
 
@@ -530,6 +627,43 @@
   .sidebar-toggle.retracted {
     left: 10px; /* Stay in place */
   }
+
+  .activity-timeline__item {
+    padding: 0.5rem;
+  }
+
+  .activity-timeline__icon-container {
+    margin-right: 0.75rem;
+  }
+
+  .activity-timeline__description {
+    font-size: 0.85rem;
+  }
+
+  .activity-timeline__timestamp,
+  .activity-timeline__metadata {
+    font-size: 0.75rem;
+  }
+}
+
+.download-invoice-btn {
+  background-color: #36A2EB;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  margin-top: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s;
+}
+
+.download-invoice-btn:hover {
+  background-color: #2a8bc8;
+}
+
+.download-invoice-btn:active {
+  background-color: #1e6a9b;
 }
 
 @media (max-width: 576px) {
@@ -543,7 +677,8 @@
 
   .profile-card-body p,
   .order-item p,
-  .modal-content p {
+  .modal-content p,
+  .activity-timeline__description {
     font-size: 0.85rem;
   }
 
@@ -565,5 +700,15 @@
 
   .vertical-timeline-element-date {
     font-size: 0.8rem !important;
+  }
+
+  .activity-timeline__icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .activity-timeline__icon-container {
+    width: 22px;
+    height: 22px;
   }
 }
