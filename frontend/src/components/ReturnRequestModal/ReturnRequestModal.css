@@ -1,0 +1,13 @@
+.modal-overlay {
+  z-index: 1000;
+}
+
+.modal-content {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+textarea {
+  min-height: 80px;
+  resize: vertical;
+}
