@@ -1,3 +1,4 @@
+// AuthContext.jsx
 import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
@@ -22,6 +23,7 @@ export const AuthProvider = ({ children }) => {
   const [questions, setQuestions] = useState([]);
   const [moderationFlags, setModerationFlags] = useState([]);
   const [userActivities, setUserActivities] = useState([]);
+  const [stockAlertRequests, setStockAlertRequests] = useState([]); // NEW: State for stock alert requests
   const activityDebounceRef = useRef(null);
 
   // Initialize WebSocket connection
@@ -73,6 +75,49 @@ export const AuthProvider = ({ children }) => {
               price_update_time: new Date().toISOString(),
             },
           }));
+        } else if (data.type === 'restock' && data.product) {
+          setProductPricing((prev) => ({
+            ...prev,
+            [data.product.id]: {
+              ...prev[data.product.id],
+              stock_quantity: Number(data.product.stock_quantity) || 0,
+              price_update_time: new Date().toISOString(),
+            },
+          }));
+        } else if (data.type === 'stockAlertRequest' && user && ['admin', 'manager'].includes(user.role)) {
+          setStockAlertRequests((prev) => {
+            if (prev.some((req) => req.id === data.request_id)) {
+              return prev;
+            }
+            return [
+              {
+                id: data.request_id,
+                user_id: data.user_id,
+                user_name: data.user_name || 'Unknown',
+                user_email: data.user_email || 'N/A',
+                product_id: data.product_id,
+                status: 'pending',
+                created_at: new Date().toISOString(),
+              },
+              ...prev,
+            ];
+          });
+          setUserActivities((prev) => {
+            if (prev.some((activity) => activity.id === data.request_id)) {
+              return prev;
+            }
+            return [
+              {
+                id: data.request_id,
+                user_id: data.user_id,
+                action_type: 'stock_alert_request',
+                description: `User requested stock alert for product ${data.product_id}`,
+                timestamp: new Date().toISOString(),
+                metadata: { product_id: data.product_id },
+              },
+              ...prev,
+            ];
+          });
         } else if (data.type === 'newQuestion' && user) {
           setQuestions((prev) => [
             {
@@ -188,7 +233,6 @@ export const AuthProvider = ({ children }) => {
             );
           }
         } else if (data.type === 'userActivityLog' && user) {
-          // Debounce activity updates
           if (activityDebounceRef.current) {
             clearTimeout(activityDebounceRef.current);
           }
@@ -204,8 +248,7 @@ export const AuthProvider = ({ children }) => {
                 }
               }
               setUserActivities((prev) => {
-                // Avoid duplicates
-                if (prev.some(activity => activity.id === data.activity_id)) {
+                if (prev.some((activity) => activity.id === data.activity_id)) {
                   return prev;
                 }
                 return [
@@ -222,6 +265,33 @@ export const AuthProvider = ({ children }) => {
               });
             }
           }, 500);
+        } else if (data.type === 'newReturnRequest' && user && data.user_id === user.id) {
+          setReturns((prev) => [
+            {
+              id: data.return_id,
+              order_id: data.order_id,
+              user_id: data.user_id,
+              order_item_id: data.order_item_id,
+              reason: data.reason,
+              request_type: data.request_type,
+              status: data.status,
+              created_at: new Date().toISOString(),
+            },
+            ...prev,
+          ]);
+        } else if (data.type === 'returnStatusUpdate' && user) {
+          if (data.user_id === user.id) {
+            setReturns((prev) =>
+              prev.map((ret) =>
+                ret.id === data.return_id
+                  ? { ...ret, status: data.status, updated_at: new Date().toISOString() }
+                  : ret
+              )
+            );
+          }
+          if (data.notification && (data.notification.user_id === user.id || ['admin', 'manager'].includes(user.role))) {
+            setNotifications((prev) => [data.notification, ...prev]);
+          }
         }
       } catch (err) {
         console.error('WebSocket message parsing error:', err.message, { rawData: event.data });
@@ -246,8 +316,10 @@ export const AuthProvider = ({ children }) => {
       try {
         const decoded = jwtDecode(token);
         console.log('Decoded token:', decoded);
+
         setUser({ id: decoded.id, name: decoded.name || decoded.email, email: decoded.email });
         setRole(decoded.role);
+
         if (['admin', 'manager', 'staff'].includes(decoded.role)) {
           fetchPermissions(token, decoded.id);
           fetchInventoryTransactions(token);
@@ -261,7 +333,7 @@ export const AuthProvider = ({ children }) => {
         } else {
           setPermissions({});
           fetchUserOrders(token);
-          fetchUserReturns(token);
+          fetchUserReturns(decoded.id);
           fetchPublicCoupons();
           fetchNotifications(token, decoded.id);
           fetchUserActivities(token, decoded.id);
@@ -272,6 +344,68 @@ export const AuthProvider = ({ children }) => {
       }
     }
   }, []);
+
+  const requestStockAlert = async (productId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to request a stock alert');
+        return { success: false, message: 'Authentication required' };
+      }
+      const response = await axios.post(
+        'http://localhost:5000/api/stock-alert/request',
+        { product_id: productId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await logActivity({
+        action_type: 'stock_alert_request',
+        description: `Requested stock alert for product ${productId}`,
+        metadata: { product_id: productId },
+      });
+      toast.success(response.data.message);
+      return { success: true, message: response.data.message };
+    } catch (error) {
+      const message = error.response?.data?.message || 'Failed to request stock alert';
+      console.error('Request stock alert error:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message,
+        error: error.message,
+      });
+      toast.error(message);
+      return { success: false, message };
+    }
+  };
+
+  const fetchStockAlertRequests = async (productId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to view stock alert requests');
+        return { success: false, message: 'Authentication required', requests: [] };
+      }
+      const response = await axios.get(`http://localhost:5000/api/stock-alert/product/${productId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setStockAlertRequests(response.data);
+      await logActivity({
+        action_type: 'view_stock_alert_requests',
+        description: `Viewed stock alert requests for product ${productId}`,
+        metadata: { product_id: productId },
+      });
+      return { success: true, requests: response.data };
+    } catch (error) {
+      const message = error.response?.data?.message || 'Failed to fetch stock alert requests';
+      console.error('Fetch stock alert requests error:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message,
+        error: error.message,
+      });
+      toast.error(message);
+      return { success: false, message, requests: [] };
+    }
+  };
 
   const fetchPermissions = async (token, userId) => {
     try {
@@ -289,7 +423,13 @@ export const AuthProvider = ({ children }) => {
         roles: { view: false, create: false, edit: false, delete: false },
         returns: { view: false, edit: false },
         sellers: { view: false, edit: false },
-        inventory: { view: false, edit: false, restock: false, transactions_view: false },
+        inventory: {
+          view: false,
+          edit: false,
+          restock: false,
+          transactions_view: false,
+          stock_alerts_view: false, // NEW: Specific permission for stock alerts
+        },
         coupons: { view: false, create: false, edit: false, delete: false },
         customers: { view: false, edit: false },
         notifications: { view: false, create: false, edit: false, delete: false },
@@ -312,7 +452,13 @@ export const AuthProvider = ({ children }) => {
         roles: { view: false, create: false, edit: false, delete: false },
         returns: { view: false, edit: false },
         sellers: { view: false, edit: false },
-        inventory: { view: false, edit: false, restock: false, transactions_view: false },
+        inventory: {
+          view: false,
+          edit: false,
+          restock: false,
+          transactions_view: false,
+          stock_alerts_view: false, // NEW
+        },
         coupons: { view: false, create: false, edit: false, delete: false },
         customers: { view: false, edit: false },
         notifications: { view: false, create: false, edit: false, delete: false },
@@ -321,6 +467,8 @@ export const AuthProvider = ({ children }) => {
       });
     }
   };
+
+  // ... (Other existing functions remain unchanged, included for completeness)
 
   const fetchUserOrders = async (token) => {
     try {
@@ -334,15 +482,118 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const fetchUserReturns = async (token) => {
+  const fetchUserReturns = async (userId) => {
     try {
-      const res = await axios.get('http://localhost:5000/api/user/returns', {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.warn('No token found for fetching user returns');
+        toast.error('Please log in to view return requests');
+        return;
+      }
+      if (!userId || isNaN(userId) || userId <= 0) {
+        console.warn('Invalid userId provided for fetching user returns:', userId);
+        toast.error('Invalid user ID');
+        return;
+      }
+      const res = await axios.get(`http://localhost:5000/api/returns/user/${userId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setReturns(res.data);
     } catch (err) {
-      console.error('Error fetching user returns:', err.message, err.response?.status);
-      toast.error('Failed to fetch returns');
+      console.error('Error fetching user returns:', {
+        message: err.message,
+        status: err.response?.status,
+        data: err.response?.data,
+      });
+      toast.error(`Failed to fetch return requests: ${err.response?.data?.message || 'Server error'}`);
+      setReturns([]);
+    }
+  };
+
+  const submitReturnRequest = async (returnData, imageFile) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to submit a return request');
+        return { success: false, message: 'No token found' };
+      }
+
+      const formData = new FormData();
+      formData.append('order_id', returnData.order_id);
+      formData.append('order_item_id', returnData.order_item_id);
+      formData.append('reason', returnData.reason);
+      formData.append('request_type', returnData.request_type);
+      if (returnData.comments) {
+        formData.append('comments', returnData.comments);
+      }
+      if (imageFile) {
+        formData.append('image', imageFile);
+      }
+
+      const res = await axios.post('http://localhost:5000/api/returns/request', formData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      setReturns((prev) => [res.data, ...prev]);
+
+      await logActivity({
+        action_type: 'return_request',
+        description: `Submitted ${returnData.request_type} request for order ${returnData.order_id}`,
+        metadata: {
+          return_id: res.data.return_id,
+          order_id: returnData.order_id,
+          order_item_id: returnData.order_item_id,
+        },
+      });
+
+      toast.success(`${returnData.request_type} request submitted successfully`);
+      return { success: true, return: res.data };
+    } catch (err) {
+      console.error('Submit return request error:', err.response?.data || err.message);
+      const errorMessage = err.response?.data?.message || 'Failed to submit return request';
+      toast.error(errorMessage);
+      return { success: false, message: errorMessage };
+    }
+  };
+
+  const updateReturnStatus = async (returnId, status) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to update return status');
+        return { success: false, message: 'No token found' };
+      }
+
+      const res = await axios.put(
+        `http://localhost:5000/api/returns/update-status/${returnId}`,
+        { status },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      setReturns((prev) =>
+        prev.map((ret) =>
+          ret.id === returnId ? { ...ret, status } : ret
+        )
+      );
+
+      await logActivity({
+        action_type: 'update_return_status',
+        description: `Updated return request ${returnId} to status ${status}`,
+        metadata: { return_id: returnId, status },
+      });
+
+      toast.success(`Return status updated to ${status}`);
+      return { success: true, message: res.data.message };
+    } catch (err) {
+      console.error('Update return status error:', err.response?.data || err.message);
+      const errorMessage = err.response?.data?.message || 'Failed to update return status';
+      toast.error(errorMessage);
+      return { success: false, message: errorMessage };
     }
   };
 
@@ -721,7 +972,7 @@ export const AuthProvider = ({ children }) => {
       } else {
         setPermissions({});
         await fetchUserOrders(res.data.token);
-        await fetchUserReturns(res.data.token);
+        await fetchUserReturns(decoded.id);
         await fetchPublicCoupons();
         await fetchNotifications(res.data.token, decoded.id);
         await fetchUserActivities(res.data.token, decoded.id);
@@ -781,8 +1032,71 @@ export const AuthProvider = ({ children }) => {
     setQuestions([]);
     setModerationFlags([]);
     setUserActivities([]);
+    setStockAlertRequests([]); // NEW: Clear stock alert requests
     if (ws) {
       ws.close();
+    }
+  };
+
+  const downloadInvoice = async (orderId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in to download the invoice');
+        return { success: false, message: 'No token found' };
+      }
+
+      const response = await axios.get(`http://localhost:5000/api/orders/invoice/${orderId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob',
+      });
+
+      if (response.headers['content-type'] !== 'application/pdf') {
+        const text = await response.data.text();
+        let errorMessage = 'Failed to download invoice';
+        try {
+          const json = JSON.parse(text);
+          errorMessage = json.message || errorMessage;
+        } catch (parseErr) {
+          console.error('Failed to parse error response:', text);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `invoice-${orderId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      await logActivity({
+        action_type: 'download_invoice',
+        description: `Downloaded invoice for order ${orderId}`,
+        metadata: { order_id: orderId },
+      });
+
+      toast.success('Invoice downloaded successfully');
+      return { success: true };
+    } catch (err) {
+      console.error('Download invoice error:', {
+        message: err.message,
+        response: err.response
+          ? {
+              status: err.response.status,
+              headers: err.response.headers,
+              data: err.response.data instanceof Blob ? '[Blob]' : err.response.data,
+            }
+          : null,
+      });
+      const errorMessage =
+        err.message === 'Network Error'
+          ? 'Server is unreachable'
+          : err.message || 'Unable to download invoice. Please try again.';
+      toast.error(errorMessage);
+      return { success: false, message: errorMessage };
     }
   };
 
@@ -1017,6 +1331,12 @@ export const AuthProvider = ({ children }) => {
         logActivity,
         fetchUserActivities,
         fetchAdminActivities,
+        downloadInvoice,
+        submitReturnRequest,
+        updateReturnStatus,
+        requestStockAlert,
+        fetchStockAlertRequests,
+        stockAlertRequests, // NEW: Expose stock alert requests
       }}
     >
       {children}
