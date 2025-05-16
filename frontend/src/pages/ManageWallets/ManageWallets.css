@@ -1,0 +1,110 @@
+.manage-wallets {
+  max-width: 1200px;
+  margin: 20px auto;
+  padding: 20px;
+  font-family: 'Roboto', sans-serif;
+}
+
+.manage-wallets h2 {
+  color: #2874f0;
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.credit-form {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.credit-form h3 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 15px;
+}
+
+.credit-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.credit-form select,
+.credit-form input {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.credit-form button {
+  background: #2874f0;
+  color: #fff;
+  padding: 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.credit-form button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.transactions-section h3 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+.transactions-table-container {
+  overflow-x: auto;
+}
+
+.transactions-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.transactions-table th,
+.transactions-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.transactions-table th {
+  background: #f5f5f5;
+  color: #333;
+  font-weight: 500;
+}
+
+.transactions-table td.credit {
+  color: #28a745;
+}
+
+.transactions-table td.debit {
+  color: #dc3545;
+}
+
+@media (max-width: 768px) {
+  .manage-wallets {
+    padding: 10px;
+  }
+
+  .credit-form form {
+    gap: 10px;
+  }
+
+  .transactions-table th,
+  .transactions-table td {
+    font-size: 14px;
+    padding: 8px;
+  }
+}
